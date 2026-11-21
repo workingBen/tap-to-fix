@@ -122,40 +122,45 @@ export async function start(config: OverlayConfig): Promise<void> {
         saving = true;
         sheet.setError(null);
         sheet.setSaving(true);
-        const shot = await shotWithin(mine.shot, SHOT_WAIT_MS);
-        const result = await postComment(
-          config,
-          {
-            site: config.site,
-            path,
+        let saved = false;
+        try {
+          const shot = await shotWithin(mine.shot, SHOT_WAIT_MS);
+          const result = await postComment(
+            config,
+            {
+              site: config.site,
+              path,
+              body,
+              ...mine.locator,
+              viewport_w: mine.viewport_w,
+              viewport_h: mine.viewport_h,
+              device: mine.device,
+            },
+            shot,
+          );
+          if (!result.ok) return;
+          saved = true;
+          comments.push({
+            id: result.id,
             body,
+            status: "open",
+            note: null,
+            pr_url: null,
             ...mine.locator,
-            viewport_w: mine.viewport_w,
-            viewport_h: mine.viewport_h,
-            device: mine.device,
-          },
-          shot,
-        );
-        saving = false;
-        if (!result.ok) {
-          // Never lose a comment: the sheet stays open with the text, ready to try again.
-          sheet.setSaving(false);
-          sheet.setError(SAVE_FAILED);
-          return;
+            created_at: new Date().toISOString(),
+          });
+          draft = null;
+          ui.closeSheet(false);
+          render();
+          flashSaved();
+        } finally {
+          saving = false;
+          if (!saved) {
+            // Never lose a comment: the sheet stays open with the text, ready to try again.
+            sheet.setSaving(false);
+            sheet.setError(SAVE_FAILED);
+          }
         }
-        comments.push({
-          id: result.id,
-          body,
-          status: "open",
-          note: null,
-          pr_url: null,
-          ...mine.locator,
-          created_at: new Date().toISOString(),
-        });
-        draft = null;
-        ui.closeSheet(false);
-        render();
-        flashSaved();
       },
     });
   };

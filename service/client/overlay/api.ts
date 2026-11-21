@@ -40,11 +40,17 @@ export async function fetchPageComments(cfg: OverlayConfig, path: string): Promi
   }
 }
 
+/** A save that hasn't answered by now counts as failed, so the reviewer is never stuck on "Saving…". */
+export const SAVE_TIMEOUT_MS = 30_000;
+
 export async function postComment(
   cfg: OverlayConfig,
   data: object,
   shot: Blob | null,
 ): Promise<{ ok: true; id: string } | { ok: false }> {
+  // A plain timer (not AbortSignal.timeout) so the abort follows the page clock.
+  const abort = new AbortController();
+  const timer = setTimeout(() => abort.abort(), SAVE_TIMEOUT_MS);
   try {
     const form = new FormData();
     form.append("data", JSON.stringify(data));
@@ -54,11 +60,14 @@ export async function postComment(
       headers: auth(cfg),
       body: form,
       credentials: "omit",
+      signal: abort.signal,
     });
     if (!res.ok) return { ok: false };
     const json = (await res.json()) as { id?: unknown };
     return typeof json.id === "string" ? { ok: true, id: json.id } : { ok: false };
   } catch {
     return { ok: false };
+  } finally {
+    clearTimeout(timer);
   }
 }

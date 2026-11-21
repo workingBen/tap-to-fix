@@ -73,6 +73,8 @@ export class OverlayUI {
   readonly host: HTMLElement;
   private readonly root: HTMLDivElement;
   private readonly bar: HTMLDivElement;
+  /** One persistent live region, so screen readers announce "Saved" when its text appears. */
+  private readonly savedNote: HTMLSpanElement;
   private readonly pinsLayer: HTMLDivElement;
   private readonly sheet: HTMLDivElement;
   private pins: PinView[] = [];
@@ -88,6 +90,8 @@ export class OverlayUI {
     const style = el("style");
     style.textContent = OVERLAY_CSS;
     this.bar = el("div", { class: "bar", "data-ttf": "bar", role: "region", "aria-label": "Review bar" });
+    this.savedNote = el("span", { class: "saved", role: "status", "data-ttf": "saved" });
+    this.bar.append(this.savedNote);
     this.pinsLayer = el("div", { class: "pins", "data-ttf": "pins" });
     this.sheet = el("div", { class: "sheet", "data-ttf": "sheet", role: "dialog", "aria-modal": "false" });
     this.sheet.hidden = true;
@@ -112,7 +116,6 @@ export class OverlayUI {
         break;
       case "reviewing":
         content = [el("span", { class: "msg" }, el("b", {}, "Reviewing"), ` · ${countLabel(state.count)}`)];
-        if (state.saved) content.push(el("span", { class: "saved", role: "status" }, icon(CHECK_ICON), "Saved"));
         content.push(link("Done"));
         break;
       case "not_assigned":
@@ -125,7 +128,12 @@ export class OverlayUI {
         content = [warn("Can't reach the review service right now.")];
         break;
     }
-    this.bar.replaceChildren(...content);
+    // Replace everything except the live region, which stays put (CSS order places it before Done).
+    for (const n of [...this.bar.childNodes]) if (n !== this.savedNote) n.remove();
+    this.bar.prepend(...content);
+    const saved = state.kind === "reviewing" && !!state.saved;
+    if (saved && !this.savedNote.textContent) this.savedNote.replaceChildren(icon(CHECK_ICON), "Saved");
+    if (!saved) this.savedNote.replaceChildren();
   }
 
   setPins(pins: PinView[]): void {

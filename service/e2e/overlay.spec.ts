@@ -435,3 +435,52 @@ test("saved pins come back after reload", async ({ page }) => {
   await expect(sheet(page)).toContainText("Come back after reload");
   await expect(sheet(page).locator(".status")).toHaveText("Open");
 });
+
+test("a save that never answers times out and keeps the text", async ({ page }) => {
+  // The page clock lets the overlay's 30 s save timeout pass without waiting for it.
+  await page.clock.install();
+  const r = await freshReviewer("Hung saver");
+  await openAsReviewer(page, "/index.html", r.token);
+  await expect(bar(page)).toContainText("Reviewing");
+  await page.route("**/api/me/comments", () => {
+    // Never fulfilled: the request hangs until the overlay gives up on it.
+  });
+  await page.locator("h1").tap();
+  const box = sheet(page).locator("textarea");
+  await box.fill("Still here after a hang");
+  const save = sheet(page).locator("[data-ttf=save]");
+  await save.tap();
+  await expect(save).toHaveText("Saving…");
+  await page.waitForTimeout(300);
+  await expect(save).toHaveText("Saving…"); // still waiting on the hung request
+
+  await page.clock.fastForward(30_000);
+  await expect(sheet(page).locator("[data-ttf=save-error]")).toHaveText(
+    "Couldn't save. Check your connection and try again.",
+  );
+  await expect(box).toHaveValue("Still here after a hang");
+  await expect(save).toBeEnabled();
+  await expect(sheet(page).getByRole("button", { name: "Cancel" })).toBeEnabled();
+
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+  await save.tap();
+  await expect(bar(page)).toContainText("1 comment");
+  await expect(sheet(page)).toBeHidden();
+  expect((await batch(r.id)).map((c) => c.body)).toEqual(["Still here after a hang"]);
+});
+
+test("the Saved notice uses one lasting live region", async ({ page }) => {
+  const r = await freshReviewer("Announcer");
+  await openAsReviewer(page, "/index.html", r.token);
+  await expect(bar(page)).toContainText("Reviewing");
+  const live = bar(page).locator("[role=status]");
+  await expect(live).toHaveCount(1);
+  await expect(live).toHaveText("");
+  const before = await live.elementHandle();
+  await page.locator("h1").tap();
+  await sheet(page).locator("textarea").fill("Announce me");
+  await sheet(page).getByRole("button", { name: "Save comment" }).tap();
+  await expect(live).toHaveText("Saved");
+  await expect(bar(page)).toContainText("1 comment");
+  expect(await live.evaluate((el, b) => el === b, before)).toBe(true);
+});

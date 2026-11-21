@@ -34,7 +34,9 @@ svg { flex: none; }
 }
 .bar a:focus-visible, .sheet button:focus-visible, .pin:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
 .bar .msg svg { color: var(--warn); }
-.root .bar .saved { color: var(--acc); font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.root .bar .saved { color: var(--acc); font-weight: 600; display: inline-flex; align-items: center; gap: 6px; order: 1; }
+.root .bar .saved:empty { display: none; }
+.bar a { order: 2; }
 .bar .saved svg { color: var(--acc); }
 
 /* pins: a zero-size layer in document coordinates */
