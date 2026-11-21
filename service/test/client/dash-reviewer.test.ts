@@ -79,6 +79,11 @@ describe("renderReviewer", () => {
     expect(headings).toEqual(["Bonus Decade", "Greensprings"]);
     // Both Bonus Decade rows sit in the first group.
     expect(doc.querySelectorAll("section")[0].querySelectorAll("a[data-assignment]").length).toBe(2);
+    // Under a heading the row shows only the path; with one site it shows "Site · /path".
+    const wheres = [...doc.querySelectorAll(".where")].map((w) => w.textContent);
+    expect(wheres).toEqual(["/sauna", "/sauna", "/sauna"]);
+    const single = new DOMParser().parseFromString(one, "text/html");
+    expect(single.querySelector(".where")?.textContent).toBe("Bonus Decade · /sauna");
   });
   it("empty state", () => {
     const html = renderReviewer({ name: "Alexis", assignments: [] });

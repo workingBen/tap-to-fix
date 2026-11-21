@@ -54,13 +54,14 @@ function chipHtml(chip: Chip | null): string {
   return `<span class="chip soft">${escapeHtml(chip)}</span>`;
 }
 
-function rowHtml(a: MeAssignment): string {
+/** `grouped`: rows sit under a site heading, so the site name is not repeated. */
+function rowHtml(a: MeAssignment, grouped = false): string {
   return (
     `<a class="row" href="${escapeHtml(a.url)}" data-assignment="${escapeHtml(a.id)}">` +
     `<span class="ring">${progressRing(a.progress, 44)}</span>` +
     `<span class="main">` +
     `<span class="title">${escapeHtml(a.title)}</span>` +
-    `<span class="where">${escapeHtml(a.site.name)} · <span class="path">${escapeHtml(a.path)}</span></span>` +
+    `<span class="where">${grouped ? "" : `${escapeHtml(a.site.name)} · `}<span class="path">${escapeHtml(a.path)}</span></span>` +
     // Each part stays whole, so a narrow screen breaks the line between parts, not inside one.
     `<span class="counts">${countLine(a)
       .split(" · ")
@@ -89,14 +90,14 @@ export function renderReviewer(data: MeResponse): string {
     g.rows.push(a);
     groups.set(a.site.slug, g);
   }
-  if (groups.size === 1) return head + `<div class="list">${data.assignments.map(rowHtml).join("")}</div>`;
+  if (groups.size === 1) return head + `<div class="list">${data.assignments.map((a) => rowHtml(a)).join("")}</div>`;
   return (
     head +
     [...groups.values()]
       .map(
         (g) =>
           `<section><h2 class="site" data-site-heading>${escapeHtml(g.name)}</h2>` +
-          `<div class="list">${g.rows.map(rowHtml).join("")}</div></section>`,
+          `<div class="list">${g.rows.map((a) => rowHtml(a, true)).join("")}</div></section>`,
       )
       .join("")
   );
@@ -134,7 +135,7 @@ section + section { margin-top: 40px; }
 .chip {
   grid-area: chip; justify-self: start; margin-top: 10px;
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 16px; font-weight: 600; line-height: 1.2; padding: 6px 14px; border-radius: 999px; white-space: nowrap;
+  font-size: 17px; font-weight: 600; line-height: 1.2; padding: 7px 15px; border-radius: 999px; white-space: nowrap;
 }
 .chip.soft { background: var(--soft); color: var(--acc); }
 .chip.plain { color: var(--acc); padding-left: 0; padding-right: 0; }
