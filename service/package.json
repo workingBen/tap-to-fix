@@ -7,6 +7,7 @@
     "dev:node": "npm run build:client && tsx src/node/server.ts",
     "typecheck": "tsc --noEmit && tsc --noEmit -p client && tsc --noEmit -p e2e",
     "build:client": "node scripts/build-client.mjs",
+    "deploy": "node scripts/deploy.mjs",
     "e2e": "npm run build:client && playwright test -c e2e"
   },
   "dependencies": {

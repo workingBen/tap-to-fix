@@ -1,0 +1,15 @@
+{
+  "name": "tap-to-fix",
+  "owner": {
+    "name": "workingBen",
+    "url": "https://github.com/workingBen"
+  },
+  "description": "tap-to-fix: reviewer comments on a live site, fixed in a Claude Code review cycle.",
+  "plugins": [
+    {
+      "name": "tap-to-fix",
+      "source": "./",
+      "description": "Reviewers tap a spot on your live site and leave a comment with a screenshot; Claude Code turns each reviewer's comments into a proofs review cycle and reports every comment's status back."
+    }
+  ]
+}
