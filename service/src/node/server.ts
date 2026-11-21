@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { serve } from "@hono/node-server";
+import { serveStatic } from "@hono/node-server/serve-static";
+import { Hono } from "hono";
 import app from "../index";
 import type { Env } from "../env";
 import { createD1 } from "./d1-sqlite";
@@ -44,6 +46,10 @@ for (const name of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
 
 const env: Env = { DB: db, SHOTS: createR2(), OWNER_TOKEN: token };
 const port = Number(process.env.PORT ?? 8787);
-serve({ fetch: (req) => app.fetch(req, env), port }, () => {
+// Static client files (public/t.js, public/overlay.js) first, then the API app.
+const outer = new Hono();
+outer.use("*", serveStatic({ root: "./public" }));
+outer.all("*", (c) => app.fetch(c.req.raw, env));
+serve({ fetch: outer.fetch, port }, () => {
   console.log(`tap-to-fix service listening on http://localhost:${port}`);
 });
