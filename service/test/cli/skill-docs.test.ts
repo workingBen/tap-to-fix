@@ -120,6 +120,15 @@ describe("skill docs", () => {
     expect(md).toMatch(/not final/);
   });
 
+  it("fix skill keys re-run setup on the CLI's message, and resume pulls in_progress too", async () => {
+    const md = fix();
+    // @ts-expect-error plain .mjs, not type-checked
+    const { TOKEN_REJECTED } = await import("../../../bin/lib/status.mjs");
+    expect(md).toContain(TOKEN_REJECTED);
+    expect(md).toContain("--status open,in_progress");
+    expect(md).toMatch(/parked in a design review/);
+  });
+
   it("fix skill never reports a repo-check crash as the wrong repo", () => {
     const md = fix();
     expect(md).toContain("process.exit(3)");

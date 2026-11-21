@@ -40,7 +40,7 @@ Exit codes for every CLI call: `0` ok, `1` error (the message is on stderr), `2`
 
 ## 2. Pull the batch (skip with `--resume`)
 
-**With `--resume`:** skip this step. Run `node <TTF> progress <reviewer> <site>` and go to step 3 with the folder it prints. If it exits `1` (no folder), say so and pull a fresh batch below.
+**With `--resume`:** skip this step. Run `node <TTF> progress <reviewer> <site>` and go to step 3 with the folder it prints. If it exits `1` (no local folder: another machine, a sandbox, a cleared home folder or a dead session), pull with `node <TTF> batch <reviewer> <site> --status open,in_progress` instead of the plain pull below, so comments an earlier run already marked in progress are not stranded. Tell the cycle that some of the `in_progress` items may already be parked in a design review or waiting on an answer: check with Ben, or keep them `in_progress`, rather than redoing the work.
 
 **Otherwise:**
 
@@ -112,7 +112,7 @@ This skill only adds the status calls; it changes nothing in proofs.
 - **The `--note`:** one plain sentence the reviewer may read, saying what happens next or why the page stays as it is. Put it in single quotes, with no line breaks. Avoid apostrophes, or write each one as `'\''`.
 - **One PR, several comments:** each comment gets its own `done` call with the same `--pr`.
 - **`Queued (offline): …` counts as success.** The CLI sends it later. Keep going.
-- **If a call exits `1` with an error that names the config or the owner token:** stop making status calls. Tell the user once to re-run `/tap-to-fix:setup`, then keep working the queue. Any other exit `1`: note it on that item's card, keep going, and do not retry in a loop.
+- **If a call exits `1` and prints `owner token rejected — re-run /tap-to-fix:setup`** (or an error that names the config): stop making status calls. Tell the user once to re-run `/tap-to-fix:setup`, then keep working the queue. Any other exit `1`: note it on that item's card, keep going, and do not retry in a loop.
 
 ## 7. Finish
 

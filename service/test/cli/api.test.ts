@@ -108,3 +108,34 @@ describe("ttf reviewers", () => {
     expect(await main(["reviewers"], { ...ctx, env: { ...ctx.env, TTF_OWNER_TOKEN: "wrong" } })).toBe(1);
   });
 });
+
+describe("a rejected owner token", () => {
+  it("batch, status, reviewers and flush all say to re-run setup and exit 1", async () => {
+    const { env, fetchImpl, cfg } = setup();
+    await seedReviewer(env, "Alexis Rivera");
+    const { mkdtempSync, mkdirSync, writeFileSync, rmSync } = await import("node:fs");
+    const { tmpdir } = await import("node:os");
+    const { join } = await import("node:path");
+    const home = mkdtempSync(join(tmpdir(), "ttf-401-"));
+    const dir = join(home, "d");
+    mkdirSync(dir);
+    writeFileSync(join(dir, "pending-status.jsonl"), JSON.stringify({ id: "c1", body: { status: "done" }, at: "2026-11-20T00:00:00Z" }) + "\n");
+    try {
+      for (const argv of [["batch", "alexis", "site"], ["status", "c1", "done"], ["reviewers"], ["flush", "--dir", dir]]) {
+        const out: string[] = [];
+        const err: string[] = [];
+        const ctx = {
+          env: { TTF_SERVICE: cfg.service, TTF_OWNER_TOKEN: "wrong", TTF_HOME: home },
+          home: "/nonexistent",
+          fetchImpl,
+          out: (x: string) => out.push(x),
+          err: (x: string) => err.push(x),
+        };
+        expect(await main(argv, ctx), argv.join(" ")).toBe(1);
+        expect(out.join("\n") + err.join("\n"), argv.join(" ")).toContain("owner token rejected — re-run /tap-to-fix:setup");
+      }
+    } finally {
+      rmSync(home, { recursive: true, force: true });
+    }
+  });
+});

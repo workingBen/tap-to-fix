@@ -20,9 +20,11 @@ const STATUSES = ["open", "in_progress", "done", "later", "kept"];
 export const PERMANENT_STATUSES = new Set([400, 404, 409, 422]);
 export const isPermanent = (e) => e instanceof ApiError && PERMANENT_STATUSES.has(e.status);
 
+export const TOKEN_REJECTED = "owner token rejected — re-run /tap-to-fix:setup";
+
 function whyKept(e) {
   if (e instanceof NetworkError) return "network unreachable";
-  if (e.status === 401) return "owner token rejected — re-run /tap-to-fix:setup";
+  if (e.status === 401) return TOKEN_REJECTED;
   return `service answered ${e.status} (${e.message})`;
 }
 

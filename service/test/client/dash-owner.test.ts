@@ -90,6 +90,14 @@ describe("readyBatches", () => {
   });
 });
 
+describe("ready box heading", () => {
+  it("uses the full name when the first name is shared", () => {
+    const smith = { ...ALEXIS, id: "r2", name: "Alexis Smith" };
+    const html = renderOwner(state({ overview: { reviewers: [ALEXIS, smith], assignments: [a({}, { open: 2 })] } }));
+    expect(html).toContain("Alexis Rivera has 2 comments ready");
+  });
+});
+
 describe("unambiguous fix commands", () => {
   it("two reviewers with the same first name both get slug commands", () => {
     const smith = { ...ALEXIS, id: "r2", name: "Alexis Smith" };

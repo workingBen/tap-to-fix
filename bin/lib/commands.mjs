@@ -4,7 +4,7 @@ import { AmbiguousReviewer, UnknownReviewer, slug, resolveReviewer } from "./rev
 import { writeBatch, readBatchFile, defaultDir, batchDirs, dirForComment, batchRoot } from "./batch.mjs";
 import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
-import { setStatus, flushPending } from "./status.mjs";
+import { setStatus, flushPending, TOKEN_REJECTED } from "./status.mjs";
 import { progress } from "./progress.mjs";
 
 /** Exit codes: 0 ok, 1 error, 2 ambiguous/unknown reviewer. */
@@ -166,7 +166,7 @@ export async function main(argv, ctx) {
       return EXIT.reviewer;
     }
     if (e instanceof ApiError || e instanceof NetworkError) {
-      ctx.err(e.message);
+      ctx.err(e instanceof ApiError && (e.status === 401 || e.status === 403) ? TOKEN_REJECTED : e.message);
       return EXIT.error;
     }
     ctx.err(e instanceof Error ? e.message : String(e));

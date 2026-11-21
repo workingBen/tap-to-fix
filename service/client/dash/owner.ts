@@ -41,8 +41,14 @@ const esc = escapeHtml;
  * first name when it is unique among all reviewers, else the full-name slug (the CLI refuses an
  * ambiguous first name). Pass every reviewer so a shared first name is noticed.
  */
-export function fixCommand(reviewerName: string, siteSlug: string, reviewers: { name: string }[] = [{ name: reviewerName }]): string {
-  return `/tap-to-fix:fix ${commandName(reviewers, { name: reviewerName })} ${siteSlug}`;
+export function fixCommand(
+  reviewerName: string,
+  siteSlug: string,
+  reviewers: { id?: string; name: string }[] = [{ name: reviewerName }],
+  reviewerId?: string,
+): string {
+  const r = reviewers.find((x) => reviewerId !== undefined && x.id === reviewerId) ?? reviewers.find((x) => x.name === reviewerName) ?? { name: reviewerName };
+  return `/tap-to-fix:fix ${commandName(reviewers, r)} ${siteSlug}`;
 }
 
 export function reviewerLink(origin: string, token: string): string {
@@ -77,7 +83,7 @@ export function readyBatches(overview: Overview, sites: Site[] = []): ReadyBatch
       siteSlug: a.site,
       siteName: siteName.get(a.site) ?? a.site,
       open: 0,
-      command: fixCommand(a.reviewer.name, a.site, overview.reviewers),
+      command: fixCommand(a.reviewer.name, a.site, overview.reviewers, a.reviewer.id),
     };
     b.open += a.counts.open;
     byKey.set(key, b);
@@ -135,7 +141,14 @@ function adder(form: string, label: string, body: string, open: boolean): string
   );
 }
 
-function readyHtml(batches: ReadyBatch[]): string {
+/** First name, or the full name when another reviewer shares it. */
+function headingName(b: ReadyBatch, all: { id: string; name: string }[]): string {
+  const first = firstName(b.reviewerName).toLowerCase();
+  const shared = all.some((x) => x.id !== b.reviewerId && firstName(x.name).toLowerCase() === first);
+  return shared ? b.reviewerName.trim() : firstName(b.reviewerName);
+}
+
+function readyHtml(batches: ReadyBatch[], reviewers: { id: string; name: string }[]): string {
   if (batches.length === 0) return "";
   return (
     `<section class="ready-wrap" aria-label="Ready for a review cycle">` +
@@ -143,7 +156,7 @@ function readyHtml(batches: ReadyBatch[]): string {
       .map(
         (b) =>
           `<div class="ready" data-ready>` +
-          `<p class="ready-h">${esc(firstName(b.reviewerName))} has ${plural(b.open, "comment", "comments")} ready for a review cycle on ${esc(b.siteName)}</p>` +
+          `<p class="ready-h">${esc(headingName(b, reviewers))} has ${plural(b.open, "comment", "comments")} ready for a review cycle on ${esc(b.siteName)}</p>` +
           `<div class="cmd"><code>${b.command
             .split(" ")
             .map((t) => `<span class="tok">${esc(t)}</span>`)
@@ -298,7 +311,7 @@ export function renderOwner(state: OwnerState): string {
   return (
     `<h1 class="sr">tap-to-fix owner dashboard</h1>` +
     `<div class="owner">` +
-    `<div class="a-ready">${readyHtml(readyBatches(state.overview, state.sites))}</div>` +
+    `<div class="a-ready">${readyHtml(readyBatches(state.overview, state.sites), state.overview.reviewers)}</div>` +
     `<div class="a-side">${reviewersHtml(state)}</div>` +
     `<div class="a-pages">${pagesHtml(state)}</div>` +
     `<div class="a-sites">${sitesHtml(state)}</div>` +

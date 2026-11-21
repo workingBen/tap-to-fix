@@ -38,9 +38,19 @@ export function resolveReviewer(reviewers, arg) {
   throw new UnknownReviewer(a);
 }
 
-/** First name when unique among reviewers, else the full-name slug. */
+/** First name when plain and it resolves back to r; else the full-name slug if plain and it resolves back; else the id. */
 export function commandName(reviewers, r) {
+  const plain = (s) => /^[a-z0-9-]+$/.test(s);
+  const back = (s) => {
+    try {
+      return resolveReviewer(reviewers, s) === r;
+    } catch {
+      return false;
+    }
+  };
   const first = firstWord(r.name);
-  const sameFirst = reviewers.filter((x) => firstWord(x.name) === first);
-  return sameFirst.length === 1 ? first : slug(r.name);
+  if (plain(first) && back(first)) return first;
+  const s = slug(r.name);
+  if (s && plain(s) && back(s)) return s;
+  return r.id;
 }

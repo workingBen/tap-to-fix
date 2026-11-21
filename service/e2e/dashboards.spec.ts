@@ -187,7 +187,7 @@ test("ready box downloads a batch file that matches the count", async ({ page })
   await comment(r.token, "/other.html", "First");
   await comment(r.token, "/other.html", "Second");
   await page.goto(OWNER_URL());
-  const box = page.locator("[data-ready]", { hasText: "Dana has 2 comments ready" });
+  const box = page.locator("[data-ready]", { hasText: "Dana Download has 2 comments ready" });
   const btn = box.getByRole("button", { name: "Download batch file" });
   await expect(btn).toBeVisible();
   expect((await btn.boundingBox())!.height).toBeGreaterThanOrEqual(44);
