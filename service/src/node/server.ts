@@ -52,16 +52,14 @@ const env: Env = { DB: db, SHOTS: createR2(), OWNER_TOKEN: token };
 const port = Number(process.env.PORT ?? 8787);
 // Static client files (public/t.js, public/overlay.js) first, then the API app.
 const outer = new Hono();
+// One middleware sets both headers: two stacked post-next c.header() calls lost the CORS header.
 outer.use("*", async (c, next) => {
   await next();
   c.header("Referrer-Policy", "no-referrer");
+  if (c.req.path.endsWith(".js")) c.header("Access-Control-Allow-Origin", "*");
 });
 outer.get("/r", (c) => c.redirect("/r/"));
 outer.get("/o", (c) => c.redirect("/o/"));
-outer.use("/*.js", async (c, next) => {
-  await next();
-  c.header("Access-Control-Allow-Origin", "*");
-});
 outer.use("*", serveStatic({ root: "./public" }));
 outer.all("*", (c) => app.fetch(c.req.raw, env));
 serve({ fetch: outer.fetch, port }, () => {
