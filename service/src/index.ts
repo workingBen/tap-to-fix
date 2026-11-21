@@ -1,9 +1,12 @@
 import { Hono } from "hono";
 import type { Env } from "./env";
+import owner from "./routes/owner";
 
 const app = new Hono<{ Bindings: Env }>();
 
 app.get("/api/health", (c) => c.json({ ok: true }));
+
+app.route("/api/owner", owner);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 
