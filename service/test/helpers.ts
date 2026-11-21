@@ -12,7 +12,9 @@ export function ownerFetch(env: Env, path: string, init: RequestInit = {}) {
 export function reviewerFetch(env: Env, token: string, path: string, init: RequestInit = {}) {
   const headers = new Headers(init.headers);
   headers.set("Authorization", "Bearer " + token);
-  if (init.body && !headers.has("Content-Type")) headers.set("Content-Type", "application/json");
+  if (init.body && !(init.body instanceof FormData) && !headers.has("Content-Type")) {
+    headers.set("Content-Type", "application/json");
+  }
   return call(path, { ...init, headers }, env);
 }
 
