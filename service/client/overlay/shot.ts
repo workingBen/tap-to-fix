@@ -22,22 +22,47 @@ async function captureViewport(exclude: Element): Promise<HTMLCanvasElement> {
   });
 }
 
+/** Teardrop path: sharp corner at (0,0), body toward (dir*s, -s), other corners round. */
+function teardrop(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, dir: 1 | -1): void {
+  const r = s / 2;
+  const px = (v: number) => x + dir * v;
+  ctx.moveTo(px(0), y);
+  ctx.lineTo(px(0), y - r);
+  ctx.arcTo(px(0), y - s, px(r), y - s, r);
+  ctx.arcTo(px(s), y - s, px(s), y - r, r);
+  ctx.arcTo(px(s), y, px(r), y, r);
+  ctx.closePath();
+}
+
+/** Same pin as the on-page one: its point at (pin.x, pin.y), body up and to the right (left near the right edge). */
 function drawPin(canvas: HTMLCanvasElement, pin: { x: number; y: number; n: number }, scale: number): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
-  const r = 15 * scale;
+  const dir: 1 | -1 = pin.x + 44 > window.innerWidth ? -1 : 1;
+  const x = pin.x * scale;
+  const y = pin.y * scale;
+  const s = 30 * scale;
+  const ring = 3 * scale;
+  ctx.save();
+  // 3px ring, opaque, on the outside edge.
   ctx.beginPath();
-  ctx.arc(pin.x * scale, pin.y * scale, r, 0, Math.PI * 2);
+  teardrop(ctx, x, y, s, dir);
+  teardrop(ctx, x + dir * ring, y - ring, s - 2 * ring, dir);
+  ctx.fillStyle = "#FBF8F2";
+  ctx.fill("evenodd");
+  // Body at 85% so words beside the point stay readable.
+  ctx.beginPath();
+  teardrop(ctx, x + dir * ring, y - ring, s - 2 * ring, dir);
+  ctx.globalAlpha = 0.85;
   ctx.fillStyle = "#1F2A24";
   ctx.fill();
-  ctx.lineWidth = 3 * scale;
-  ctx.strokeStyle = "#FBF8F2";
-  ctx.stroke();
+  ctx.globalAlpha = 1;
   ctx.fillStyle = "#fff";
-  ctx.font = `bold ${14 * scale}px sans-serif`;
+  ctx.font = `bold ${17 * scale}px sans-serif`;
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(String(pin.n), pin.x * scale, pin.y * scale + scale);
+  ctx.fillText(String(pin.n), x + dir * (s / 2), y - s / 2 + scale);
+  ctx.restore();
 }
 
 function toBlob(canvas: HTMLCanvasElement, type: string, quality: number): Promise<Blob | null> {

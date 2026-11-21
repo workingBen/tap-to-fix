@@ -43,22 +43,35 @@ svg { flex: none; }
 .pins { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 2147483646; pointer-events: none; }
 .pin {
   position: absolute; width: 44px; height: 44px; padding: 0; border: 0; background: transparent;
-  display: grid; place-items: center; cursor: pointer; pointer-events: auto;
+  cursor: pointer; pointer-events: auto;
   -webkit-tap-highlight-color: transparent;
 }
-.root .dot {
-  width: 30px; height: 30px; border-radius: 50%;
+/* The teardrop's sharp point is the tap spot: the button's bottom-left corner (bottom-right when
+   flipped near the right edge). The body is a 30px square with one square corner, kept upright. */
+.root .pin .dot {
+  position: absolute; left: 0; bottom: 0; box-sizing: border-box;
+  width: 30px; height: 30px; border-radius: 50% 50% 50% 0;
   display: grid; place-items: center;
   font-weight: 700; font-size: 17px; line-height: 1;
-  background: var(--ink); color: var(--bg);
+  border: 3px solid var(--bg); background-clip: padding-box;
+  background-color: color-mix(in srgb, var(--ink) 85%, transparent); color: #fff;
+  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, .25));
+}
+/* The read sheet's badge keeps the plain round number. */
+.root .badge .dot {
+  width: 30px; height: 30px; border-radius: 50%; display: grid; place-items: center;
+  font-weight: 700; font-size: 17px; line-height: 1; background: var(--ink); color: #fff;
   box-shadow: 0 0 0 3px var(--bg), 0 4px 10px rgba(0, 0, 0, .25);
 }
-.root .settled .dot { background: var(--acc); color: var(--acc-ink); }
-.root .moved .dot { outline: 2px dashed var(--ink); outline-offset: 4px; }
+.root .badge.settled .dot { background: var(--acc); }
+.root .badge.moved .dot { outline: 2px dashed var(--ink); outline-offset: 4px; }
+.root .pin.flip .dot { left: auto; right: 0; border-radius: 50% 50% 0 50%; }
+.root .pin.settled .dot { background-color: color-mix(in srgb, var(--acc) 85%, transparent); }
+.root .pin.moved .dot { outline: 2px dashed var(--ink); outline-offset: 4px; }
 .pin.new { pointer-events: none; }
 .root .pin.new .dot {
-  background: var(--acc); color: var(--acc-ink);
-  box-shadow: 0 0 0 3px var(--bg), 0 0 0 9px color-mix(in srgb, var(--acc) 30%, transparent);
+  background-color: color-mix(in srgb, var(--acc) 85%, transparent);
+  filter: drop-shadow(0 0 0 transparent) drop-shadow(0 0 6px color-mix(in srgb, var(--acc) 55%, transparent));
 }
 
 /* bottom sheet */

@@ -1,7 +1,7 @@
 // Screenshots of the comment layer on the fixture page: bar + compose sheet, then bar + read sheet with two saved pins.
 // Run: npm run build:client && npx tsx e2e/shots-overlay.ts <out-dir>
 import { chromium } from "@playwright/test";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { measure } from "./measure";
 import globalSetup, { FIXTURE, OWNER_TOKEN, SERVICE } from "./global-setup";
@@ -63,6 +63,17 @@ try {
     await press(overlay.locator("[data-ttf=pin]").first());
     await sheet.waitFor();
     await shoot(`overlay-read-${w}.png`);
+    if (w === 390) {
+      // One saved screenshot as the owner API serves it, to check the pin drawn onto it.
+      const h = { Authorization: `Bearer ${OWNER_TOKEN}` };
+      const list = (await (await fetch(`${SERVICE}/api/owner/batch?reviewer=${rv.id}&site=fixture&status=open`, { headers: h })).json()) as { comments: { id: string; has_screenshot: boolean }[] };
+      const c = list.comments.find((x) => x.has_screenshot);
+      if (c) {
+        const res = await fetch(`${SERVICE}/api/owner/comments/${c.id}/screenshot`, { headers: h });
+        const ext = (res.headers.get("content-type") ?? "").includes("webp") ? "webp" : "jpg";
+        writeFileSync(join(out, `shot-sample.${ext}`), Buffer.from(await res.arrayBuffer()));
+      }
+    }
     await ctx.close();
   }
   await browser.close();

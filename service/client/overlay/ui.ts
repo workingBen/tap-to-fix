@@ -148,14 +148,16 @@ export class OverlayUI {
     const ox = r.left + win.scrollX;
     const oy = r.top + win.scrollY;
     const nodes = this.pins.map((p) => {
-      const cls = ["pin", p.settled ? "settled" : "", p.moved ? "moved" : "", p.draft ? "new" : ""].filter(Boolean);
+      const flip = p.x - win.scrollX + 44 > win.innerWidth;
+      const cls = ["pin", flip ? "flip" : "", p.settled ? "settled" : "", p.moved ? "moved" : "", p.draft ? "new" : ""].filter(Boolean);
       const b = el(
         "button",
         { type: "button", class: cls.join(" "), "data-ttf": "pin", "aria-label": `Comment ${p.n}` },
         el("span", { class: "dot" }, String(p.n)),
       );
-      b.style.left = `${p.x - ox - 22}px`;
-      b.style.top = `${p.y - oy - 22}px`;
+      // The pin's point is the tap spot: bottom-left of the box, or bottom-right when flipped.
+      b.style.left = `${p.x - ox - (flip ? 44 : 0)}px`;
+      b.style.top = `${p.y - oy - 44}px`;
       if (p.draft) b.tabIndex = -1;
       else b.addEventListener("click", () => this.onPinTap(p.n));
       return b;

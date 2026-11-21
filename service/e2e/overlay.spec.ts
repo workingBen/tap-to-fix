@@ -121,9 +121,21 @@ test("the pin lands where the reviewer tapped", async ({ page }) => {
   await page.touchscreen.tap(at.x, at.y);
   await expect(pins(page)).toHaveCount(1);
   const pin = (await pins(page).first().boundingBox())!;
-  expect(Math.abs(pin.x + pin.width / 2 - at.x)).toBeLessThan(3);
-  expect(Math.abs(pin.y + pin.height / 2 - at.y)).toBeLessThan(3);
+  // The teardrop's point (bottom-left of the hit area) is the tap spot.
+  expect(Math.abs(pin.x - at.x)).toBeLessThan(6);
+  expect(Math.abs(pin.y + pin.height - at.y)).toBeLessThan(6);
   expect(pin.width).toBeGreaterThanOrEqual(44);
+  expect(pin.height).toBeGreaterThanOrEqual(44);
+  // The body does not cover the words at the tap point: 8px to its left is not the pin.
+  const hit = await page.evaluate(({ x, y }) => {
+    const hitEl = document.querySelector("tap-to-fix-overlay")?.shadowRoot?.elementFromPoint(x - 8, y);
+    return hitEl ? hitEl.closest("[data-ttf=pin]") !== null : false;
+  }, at);
+  expect(hit).toBe(false);
+  // elementFromPoint skips a pointer-events:none draft pin, so also check the visible body's box.
+  const dot = (await pins(page).first().locator(".dot").boundingBox())!;
+  expect(dot.x).toBeGreaterThanOrEqual(at.x - 6);
+  expect(dot.y + dot.height).toBeLessThanOrEqual(at.y + 6);
 });
 
 test("a page touchend preventDefault still lets a tap drop a pin", async ({ page }) => {
@@ -334,7 +346,7 @@ test("tapping an existing pin opens the read sheet", async ({ page }) => {
   await expect(sheet(page)).toContainText("Make the heading friendlier");
   await expect(sheet(page).locator(".status")).toHaveText("Kept as is");
   const settledColor = await pins(page).nth(0).locator(".dot").evaluate((el) => getComputedStyle(el).backgroundColor);
-  expect(settledColor).toBe("rgb(47, 107, 79)"); // --acc
+  expect(settledColor).toMatch(/0\.309804 \/ 0\.85\)|rgba\(47, 107, 79, 0\.85\)/); // --acc at 85%
   await expect(sheet(page)).toContainText("We like it as it is");
   await sheet(page).getByRole("button", { name: "Close" }).tap();
   await expect(sheet(page)).toBeHidden();
