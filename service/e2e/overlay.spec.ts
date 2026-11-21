@@ -129,7 +129,8 @@ test("typing in the comment box does not trigger page shortcuts", async ({ page 
   const seen = await page.evaluate(() => ({ ...document.body.dataset }));
   expect(seen.shortcut).toBeUndefined();
   expect(seen.pageInput).toBeUndefined();
-  // The overlay's own Escape still works.
+  // The overlay's own Escape still works (it asks first, since text was typed).
+  page.once("dialog", (d) => void d.accept());
   await page.keyboard.press("Escape");
   await expect(sheet(page)).toBeHidden();
 });
@@ -231,4 +232,206 @@ test("tapping an existing pin opens the read sheet", async ({ page }) => {
   expect(await page.evaluate(() => document.body.dataset.xss)).toBeUndefined();
   await sheet(page).getByRole("button", { name: "Close" }).tap();
   expect(new URL(page.url()).pathname).toBe("/index.html");
+});
+
+test("cancel asks before throwing away typed text", async ({ page }) => {
+  await openReady(page);
+  await page.locator("h1").tap();
+  const box = sheet(page).locator("textarea");
+  await box.fill("Half a thought");
+
+  // Dismissed: nothing is lost.
+  const asked: string[] = [];
+  page.once("dialog", (d) => {
+    asked.push(d.message());
+    void d.dismiss();
+  });
+  await sheet(page).getByRole("button", { name: "Cancel" }).tap();
+  expect(asked).toEqual(["Discard this comment?"]);
+  await expect(sheet(page)).toBeVisible();
+  await expect(box).toHaveValue("Half a thought");
+  await expect(pins(page)).toHaveCount(1);
+
+  // Escape asks too; accepting discards the draft.
+  page.once("dialog", (d) => {
+    asked.push(d.message());
+    void d.accept();
+  });
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toBeHidden();
+  await expect(pins(page)).toHaveCount(0);
+  expect(asked).toEqual(["Discard this comment?", "Discard this comment?"]);
+});
+
+// ---- Saving. Each test gets its own reviewer, so counts never depend on test order. ----
+
+async function freshReviewer(name: string): Promise<{ id: string; token: string }> {
+  const r = await owner<{ id: string; token: string }>("POST", "/reviewers", { name });
+  await owner("POST", "/assignments", { site: "fixture", reviewer_id: r.id, path: "/index.html", title: "Fixture home" });
+  return r;
+}
+
+type BatchComment = {
+  id: string;
+  body: string;
+  selector: string | null;
+  element_text: string | null;
+  device: string | null;
+  viewport_w: number | null;
+  has_screenshot: boolean;
+};
+
+async function batch(reviewerId: string): Promise<BatchComment[]> {
+  const res = await fetch(`${SERVICE}/api/owner/batch?reviewer=${reviewerId}&site=fixture&status=open`, {
+    headers: ownerHeaders(),
+  });
+  expect(res.status).toBe(200);
+  return ((await res.json()) as { comments: BatchComment[] }).comments;
+}
+
+test("saving records the spot and a screenshot", async ({ page }, testInfo) => {
+  const touch = !!testInfo.project.use.hasTouch;
+  const press = (l: ReturnType<Page["locator"]>) => (touch ? l.tap() : l.click());
+  const r = await freshReviewer(`Saver ${testInfo.project.name}`);
+  await openAsReviewer(page, "/index.html", r.token);
+  await expect(bar(page)).toContainText("0 comments");
+  const heading = ((await page.locator("h1").textContent()) ?? "").trim();
+
+  await press(page.locator("h1"));
+  const save = sheet(page).getByRole("button", { name: "Save comment" });
+  await expect(save).toBeDisabled(); // nothing typed yet
+  await sheet(page).locator("textarea").fill("Make this bigger");
+  await expect(save).toBeEnabled();
+  await press(save);
+
+  await expect(bar(page)).toContainText("1 comment");
+  await expect(bar(page)).toContainText("Saved");
+  await expect(sheet(page)).toBeHidden();
+  await expect(pins(page)).toHaveCount(1);
+  await expect(pins(page).first()).not.toHaveClass(/new/);
+
+  const [c] = await batch(r.id);
+  expect(c.body).toBe("Make this bigger");
+  expect(await page.evaluate((sel) => document.querySelector(sel!) === document.querySelector("h1"), c.selector)).toBe(true);
+  expect(c.element_text!.startsWith(heading.slice(0, 20))).toBe(true);
+  const vw = testInfo.project.use.viewport!.width;
+  expect(c.device).toBe(vw < 768 ? "phone" : "desktop");
+  expect(c.viewport_w).toBe(vw);
+  expect(c.has_screenshot).toBe(true);
+
+  const shot = await fetch(`${SERVICE}/api/owner/comments/${c.id}/screenshot`, { headers: ownerHeaders() });
+  expect(shot.status).toBe(200);
+  const type = shot.headers.get("content-type") ?? "";
+  expect(["image/webp", "image/jpeg"]).toContain(type);
+  const bytes = Buffer.from(await shot.arrayBuffer());
+  expect(bytes.length).toBeLessThanOrEqual(1_048_576);
+  const width = await page.evaluate(async (src) => {
+    const img = new Image();
+    img.src = src;
+    await img.decode();
+    const canvas = document.createElement("canvas");
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.getContext("2d")!.drawImage(img, 0, 0);
+    return canvas.width;
+  }, `data:${type};base64,${bytes.toString("base64")}`);
+  expect(width).toBeGreaterThan(0);
+  expect(width).toBeLessThanOrEqual(1200);
+
+  await expect(bar(page)).not.toContainText("Saved", { timeout: 5000 });
+});
+
+test("cross-origin image does not block saving", async ({ page }) => {
+  const r = await freshReviewer("Photo saver");
+  await openAsReviewer(page, "/index.html", r.token);
+  await expect(bar(page)).toContainText("Reviewing");
+  await page.locator("#photo").evaluate((img: HTMLImageElement) => img.decode().catch(() => {}));
+  await expect(page.locator("#photo")).toBeInViewport();
+  await page.locator("#photo").tap();
+  await sheet(page).locator("textarea").fill("Swap this photo");
+  await sheet(page).getByRole("button", { name: "Save comment" }).tap();
+  await expect(bar(page)).toContainText("1 comment", { timeout: 20_000 });
+  const comments = await batch(r.id);
+  expect(comments.map((c) => c.body)).toEqual(["Swap this photo"]);
+});
+
+test("screenshot failure still saves the comment", async ({ page }) => {
+  await page.addInitScript(() => {
+    HTMLCanvasElement.prototype.toBlob = function (cb: BlobCallback) {
+      cb(null);
+    };
+  });
+  const r = await freshReviewer("No screenshot");
+  await openAsReviewer(page, "/index.html", r.token);
+  await expect(bar(page)).toContainText("Reviewing");
+  await page.locator("h1").tap();
+  await sheet(page).locator("textarea").fill("Still saved");
+  await sheet(page).getByRole("button", { name: "Save comment" }).tap();
+  await expect(bar(page)).toContainText("1 comment");
+  const [c] = await batch(r.id);
+  expect(c.body).toBe("Still saved");
+  expect(c.has_screenshot).toBe(false);
+});
+
+test("network failure keeps the text", async ({ page }) => {
+  const r = await freshReviewer("Offline saver");
+  await openAsReviewer(page, "/index.html", r.token);
+  await expect(bar(page)).toContainText("Reviewing");
+  // Fail slowly, so the busy state can be seen.
+  await page.route("**/api/me/comments", async (route) => {
+    await new Promise((r) => setTimeout(r, 800));
+    await route.abort();
+  });
+  await page.locator("h1").tap();
+  const box = sheet(page).locator("textarea");
+  await box.fill("Do not lose me");
+  const save = sheet(page).locator("[data-ttf=save]");
+  await save.tap();
+  await expect(save).toHaveText("Saving…");
+  await expect(save).toBeDisabled();
+  await expect(sheet(page).getByRole("button", { name: "Cancel" })).toBeDisabled();
+  const warning = sheet(page).locator("[data-ttf=save-error]");
+  await expect(warning).toHaveText("Couldn't save. Check your connection and try again.");
+  const colors = await warning.evaluate((el) => {
+    const s = getComputedStyle(el);
+    return { color: s.color, bg: s.backgroundColor };
+  });
+  expect(colors).toEqual({ color: "rgb(154, 91, 19)", bg: "rgb(251, 239, 217)" }); // --warn on --warn-bg
+  await expect(sheet(page)).toBeVisible();
+  await expect(box).toHaveValue("Do not lose me");
+  await expect(save).toBeEnabled();
+  await expect(save).toHaveText("Save comment");
+  await expect(bar(page)).toContainText("0 comments");
+
+  await page.unroute("**/api/me/comments");
+  await save.tap();
+  await expect(bar(page)).toContainText("1 comment");
+  await expect(sheet(page)).toBeHidden();
+  expect((await batch(r.id)).map((c) => c.body)).toEqual(["Do not lose me"]);
+});
+
+test("saved pins come back after reload", async ({ page }) => {
+  const r = await freshReviewer("Reloader");
+  await openAsReviewer(page, "/index.html", r.token);
+  await expect(bar(page)).toContainText("Reviewing");
+  const box = (await page.locator("h1").boundingBox())!;
+  const at = { x: box.x + box.width / 2, y: box.y + box.height / 2 };
+  await page.touchscreen.tap(at.x, at.y);
+  await sheet(page).locator("textarea").fill("Come back after reload");
+  await sheet(page).getByRole("button", { name: "Save comment" }).tap();
+  await expect(bar(page)).toContainText("1 comment");
+
+  await openAsReviewer(page, "/index.html", r.token);
+  await expect(bar(page)).toContainText("1 comment");
+  await expect(pins(page)).toHaveCount(1);
+  // Pins are re-laid out as the page settles (image load, fonts), so poll the distance.
+  await expect
+    .poll(async () => {
+      const pin = await pins(page).first().boundingBox();
+      return pin ? Math.hypot(pin.x + pin.width / 2 - at.x, pin.y + pin.height / 2 - at.y) : Infinity;
+    })
+    .toBeLessThan(40);
+  await pins(page).first().tap();
+  await expect(sheet(page)).toContainText("Come back after reload");
+  await expect(sheet(page).locator(".status")).toHaveText("Open");
 });

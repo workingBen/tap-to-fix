@@ -1,7 +1,21 @@
-import { fetchPageComments, type PageComment } from "./api";
+import { fetchPageComments, postComment, type PageComment } from "./api";
 import { describeElement, findPin, locatorFor, type Locator } from "./locate";
 import { takeScreenshot } from "./shot";
 import { isSettled, OverlayUI, type PinView } from "./ui";
+
+/** How long Save waits for the screenshot before sending the comment without it. */
+const SHOT_WAIT_MS = 12_000;
+const SAVED_NOTICE_MS = 3_000;
+const SAVE_FAILED = "Couldn't save. Check your connection and try again.";
+
+/** The screenshot, or null if it isn't ready in time (it never rejects, but may be slow). */
+function shotWithin(shot: Promise<Blob | null>, ms: number): Promise<Blob | null> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const late = new Promise<null>((resolve) => {
+    timer = setTimeout(() => resolve(null), ms);
+  });
+  return Promise.race([shot.catch(() => null), late]).finally(() => clearTimeout(timer));
+}
 
 export type OverlayConfig = { base: string; site: string; token: string; dashboardUrl: string };
 
@@ -47,7 +61,15 @@ export async function start(config: OverlayConfig): Promise<void> {
     if (draft) pins.push({ n: draft.n, x: draft.locator.page_x, y: draft.locator.page_y, draft: true });
     ui.setPins(pins);
   };
-  const updateBar = () => ui.setBar({ kind: "reviewing", count: comments.length });
+  let savedUntil = 0;
+  let savedTimer: ReturnType<typeof setTimeout> | undefined;
+  const updateBar = () => ui.setBar({ kind: "reviewing", count: comments.length, saved: Date.now() < savedUntil });
+  const flashSaved = () => {
+    savedUntil = Date.now() + SAVED_NOTICE_MS;
+    clearTimeout(savedTimer);
+    savedTimer = setTimeout(updateBar, SAVED_NOTICE_MS);
+    updateBar();
+  };
 
   ui.onPinTap = (n) => {
     if (draft) return; // never throw away text being typed
@@ -89,17 +111,57 @@ export async function start(config: OverlayConfig): Promise<void> {
     render();
     // Keep the pin above the sheet: if it is in the lower 55%, bring it to the top third.
     if (clientY > win.innerHeight * 0.45) win.scrollBy(0, clientY - win.innerHeight / 3);
-    ui.openCompose({
+    const mine = draft;
+    let saving = false;
+    const sheet = ui.openCompose({
       describe: describeElement(target),
       onCancel: cancelDraft,
-      onSave: () => {
-        // Saving is wired in the next step of the plan; the draft (with its screenshot) stays ready.
+      onSave: async (text) => {
+        const body = text.trim();
+        if (saving || !body || draft !== mine) return;
+        saving = true;
+        sheet.setError(null);
+        sheet.setSaving(true);
+        const shot = await shotWithin(mine.shot, SHOT_WAIT_MS);
+        const result = await postComment(
+          config,
+          {
+            site: config.site,
+            path,
+            body,
+            ...mine.locator,
+            viewport_w: mine.viewport_w,
+            viewport_h: mine.viewport_h,
+            device: mine.device,
+          },
+          shot,
+        );
+        saving = false;
+        if (!result.ok) {
+          // Never lose a comment: the sheet stays open with the text, ready to try again.
+          sheet.setSaving(false);
+          sheet.setError(SAVE_FAILED);
+          return;
+        }
+        comments.push({
+          id: result.id,
+          body,
+          status: "open",
+          note: null,
+          pr_url: null,
+          ...mine.locator,
+          created_at: new Date().toISOString(),
+        });
+        draft = null;
+        ui.closeSheet(false);
+        render();
+        flashSaved();
       },
     });
   };
 
   const onKey = (e: KeyboardEvent) => {
-    if (e.key === "Escape" && ui.sheetOpen) ui.closeSheet();
+    if (e.key === "Escape" && ui.sheetOpen) ui.dismissSheet();
   };
 
   updateBar();

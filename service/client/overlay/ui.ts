@@ -13,7 +13,7 @@ export const isSettled = (s: Status): boolean => s === "done" || s === "later" |
 
 export type BarState =
   | { kind: "loading" }
-  | { kind: "reviewing"; count: number }
+  | { kind: "reviewing"; count: number; saved?: boolean }
   | { kind: "not_assigned" }
   | { kind: "signed_out" }
   | { kind: "offline" };
@@ -45,6 +45,7 @@ function icon(paths: string[]): SVGSVGElement {
   return svg;
 }
 const ALERT_ICON = ["M12 3l9.5 17h-19z", "M12 10v4", "M12 17.5v.01"];
+const CHECK_ICON = ["M5 12.5l4.5 4.5L19 7.5"];
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -57,6 +58,15 @@ function el<K extends keyof HTMLElementTagNameMap>(
   return e;
 }
 
+/** What the compose sheet lets the save flow change while it works. */
+export type ComposeHandle = {
+  textarea: HTMLTextAreaElement;
+  /** Busy: Save shows "Saving…", and Save and Cancel are disabled. */
+  setSaving(on: boolean): void;
+  /** Shows (or, with null, clears) the warning above the buttons. */
+  setError(message: string | null): void;
+};
+
 export const countLabel = (n: number): string => `${n} ${n === 1 ? "comment" : "comments"}`;
 
 export class OverlayUI {
@@ -67,6 +77,8 @@ export class OverlayUI {
   private readonly sheet: HTMLDivElement;
   private pins: PinView[] = [];
   private onSheetClose: (() => void) | null = null;
+  /** Asked before a user-initiated close (Cancel, Escape); false keeps the sheet open. */
+  private mayDismiss: (() => boolean) | null = null;
   onPinTap: (n: number) => void = () => {};
 
   constructor(private readonly doc: Document, private readonly dashboardUrl: string) {
@@ -99,7 +111,9 @@ export class OverlayUI {
         content = [el("span", { class: "msg" }, "Opening your review…")];
         break;
       case "reviewing":
-        content = [el("span", { class: "msg" }, el("b", {}, "Reviewing"), ` · ${countLabel(state.count)}`), link("Done")];
+        content = [el("span", { class: "msg" }, el("b", {}, "Reviewing"), ` · ${countLabel(state.count)}`)];
+        if (state.saved) content.push(el("span", { class: "saved", role: "status" }, icon(CHECK_ICON), "Saved"));
+        content.push(link("Done"));
         break;
       case "not_assigned":
         content = [warn("This page isn't on your review list"), link("Back to your list")];
@@ -145,24 +159,55 @@ export class OverlayUI {
     return !this.sheet.hidden;
   }
 
-  /** The compose sheet. Resolves nothing; callbacks carry the outcome. */
-  openCompose(opts: { describe: string; onCancel: () => void; onSave: (text: string) => void }): HTMLTextAreaElement {
+  /** The compose sheet. Callbacks carry the outcome; the handle lets the save flow show progress. */
+  openCompose(opts: { describe: string; onCancel: () => void; onSave: (text: string) => void }): ComposeHandle {
     const textarea = el("textarea", { rows: "4", "aria-label": "Your comment", autofocus: "" });
     const save = el("button", { type: "button", class: "btn primary", "data-ttf": "save" }, "Save comment");
     const cancel = el("button", { type: "button", class: "btn ghost" }, "Cancel");
-    save.addEventListener("click", () => opts.onSave(textarea.value));
-    cancel.addEventListener("click", () => this.closeSheet());
+    const error = el("p", { class: "save-error", "data-ttf": "save-error", role: "alert" });
+    error.hidden = true;
+    let saving = false;
+    const refresh = () => {
+      save.disabled = saving || !textarea.value.trim();
+      cancel.disabled = saving;
+    };
+    textarea.addEventListener("input", refresh);
+    save.addEventListener("click", () => {
+      if (!save.disabled) opts.onSave(textarea.value);
+    });
+    cancel.addEventListener("click", () => this.dismissSheet());
     this.show(
       [
         el("h2", { class: "sheet-h", id: "ttf-sheet-h" }, "What should change here?"),
         el("p", { class: "sub", "data-ttf": "sub" }, opts.describe),
         textarea,
+        error,
         el("div", { class: "actions" }, save, cancel),
       ],
       opts.onCancel,
     );
+    // Typed text is never thrown away without asking; nothing closes the sheet mid-save.
+    this.mayDismiss = () => {
+      if (saving) return false;
+      if (!textarea.value.trim()) return true;
+      const win = this.doc.defaultView ?? window;
+      return win.confirm("Discard this comment?");
+    };
+    refresh();
     textarea.focus({ preventScroll: true });
-    return textarea;
+    return {
+      textarea,
+      setSaving: (on) => {
+        saving = on;
+        save.textContent = on ? "Saving…" : "Save comment";
+        save.setAttribute("aria-busy", String(on));
+        refresh();
+      },
+      setError: (message) => {
+        error.hidden = message === null;
+        error.replaceChildren(...(message === null ? [] : [icon(ALERT_ICON), el("span", {}, message)]));
+      },
+    };
   }
 
   openRead(view: ReadView): void {
@@ -188,6 +233,13 @@ export class OverlayUI {
     close.focus({ preventScroll: true });
   }
 
+  /** A user asking to close (Cancel, Escape): checks first, so typed text is never lost by accident. */
+  dismissSheet(): void {
+    if (this.sheet.hidden) return;
+    if (this.mayDismiss && !this.mayDismiss()) return;
+    this.closeSheet();
+  }
+
   /** Closes the sheet. A compose sheet's onCancel runs (removing its unsaved pin) unless
    *  `canceled` is false, which is how a successful save will close it. */
   closeSheet(canceled = true): void {
@@ -195,6 +247,7 @@ export class OverlayUI {
     this.sheet.hidden = true;
     this.sheet.classList.remove("open");
     this.sheet.replaceChildren();
+    this.mayDismiss = null;
     const cb = this.onSheetClose;
     this.onSheetClose = null;
     if (canceled) cb?.();
@@ -209,5 +262,4 @@ export class OverlayUI {
     void this.sheet.offsetHeight; // start the slide-up from the closed position
     this.sheet.classList.add("open");
   }
-
 }

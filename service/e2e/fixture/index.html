@@ -12,6 +12,8 @@
   <header style="height: 90px">Fixture site header</header>
   <h1>Welcome to the fixture</h1>
   <p id="intro">This page stands in for a real site while the overlay is tested.</p>
+  <!-- Served from a second origin without CORS headers, so a screenshot cannot read it. -->
+  <img id="photo" src="http://localhost:4174/photo.jpg" width="240" height="160" alt="A photo from another site">
   <p><a id="other-link" href="/other.html">Read the other page</a></p>
   <form action="/other.html"><button id="go" type="submit">Send the form</button></form>
   <ul>

@@ -34,6 +34,8 @@ svg { flex: none; }
 }
 .bar a:focus-visible, .sheet button:focus-visible, .pin:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
 .bar .msg svg { color: var(--warn); }
+.root .bar .saved { color: var(--acc); font-weight: 600; display: inline-flex; align-items: center; gap: 6px; }
+.bar .saved svg { color: var(--acc); }
 
 /* pins: a zero-size layer in document coordinates */
 .pins { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 2147483646; pointer-events: none; }
@@ -78,6 +80,15 @@ svg { flex: none; }
   background: var(--bg); line-height: 1.45;
 }
 .root textarea:focus { outline: none; border-color: var(--acc); }
+.root .save-error {
+  display: flex; gap: 8px; align-items: flex-start; margin-top: 12px; padding: 10px 14px;
+  border-radius: var(--r); background: var(--warn-bg); color: var(--warn); font-weight: 600;
+}
+.root .save-error * { color: var(--warn); font-weight: 600; }
+.save-error svg { margin-top: 2px; }
+.save-error[hidden] { display: none; }
+.root .btn:disabled { opacity: .55; cursor: default; }
+.root .btn[aria-busy="true"]:disabled { opacity: .85; }
 .actions { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
 .root .btn {
   min-height: 48px; width: 100%; padding: 10px 18px; border-radius: 999px; border: 0;
