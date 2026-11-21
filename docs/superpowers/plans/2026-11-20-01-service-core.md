@@ -20,7 +20,7 @@
 - Reviewers see only their own comments and screenshots. Nothing in the reviewer API returns another reviewer's data.
 - Reviewers may comment only on paths assigned to them.
 - **Never lose a comment:** a missing or rejected screenshot never blocks saving the comment.
-- Screenshot byte ceiling: `MAX_SCREENSHOT_BYTES` in `service/src/limits.ts`. **Value pending Ben's answer** (recommended 2 MB, browser downscale to 1600 px wide); do not invent another number.
+- Screenshot byte ceiling: `MAX_SCREENSHOT_BYTES = 1_048_576` (1 MB) in `service/src/limits.ts`, Ben's call 2026-11-20. (The browser downscales to 1200 px wide before upload; that is plan 2.)
 - Screenshots are never served by a public URL; only through the authenticated screenshot route.
 - Commit with explicit paths; never `git add -A`.
 

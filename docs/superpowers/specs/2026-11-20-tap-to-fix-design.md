@@ -94,4 +94,4 @@ It is built for Ben first, then open-sourced with its own website, the way Proof
 
 ## Open, to settle with Ben during planning
 
-- The screenshot downscale size and server-side size ceiling (ask before fixing numbers).
+- None. (Screenshot limits settled 2026-11-20: downscale to 1200 px wide in the browser, 1 MB server ceiling.)
