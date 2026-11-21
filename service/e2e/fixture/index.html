@@ -19,5 +19,14 @@
     <li>Second thing to review</li>
   </ul>
   <p id="far" style="margin: 900px 0">Far down a long page.</p>
+  <script>
+    // A typical site keyboard shortcut: ignores keys typed into fields, reacts to "/" and "j".
+    document.addEventListener("keydown", (e) => {
+      const t = e.target;
+      if (t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement || (t && t.isContentEditable)) return;
+      if (e.key === "/" || e.key === "j" || e.key === " ") document.body.dataset.shortcut = e.key;
+    });
+    document.addEventListener("input", () => { document.body.dataset.pageInput = "1"; });
+  </script>
 </body>
 </html>

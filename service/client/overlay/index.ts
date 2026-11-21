@@ -106,8 +106,18 @@ export async function start(config: OverlayConfig): Promise<void> {
   render();
   doc.addEventListener("click", onClick, true);
   doc.addEventListener("keydown", onKey, true);
-  win.addEventListener("resize", render);
-  if (doc.readyState !== "complete") win.addEventListener("load", render, { once: true });
-  doc.fonts?.ready.then(render, () => {});
-  if (typeof ResizeObserver !== "undefined") new ResizeObserver(() => render()).observe(doc.body);
+  // Coalesce bursts (resize, lazy images reflowing the page) into one layout per frame.
+  let queued = false;
+  const schedule = () => {
+    if (queued) return;
+    queued = true;
+    requestAnimationFrame(() => {
+      queued = false;
+      render();
+    });
+  };
+  win.addEventListener("resize", schedule);
+  if (doc.readyState !== "complete") win.addEventListener("load", schedule, { once: true });
+  doc.fonts?.ready.then(schedule, () => {});
+  if (typeof ResizeObserver !== "undefined") new ResizeObserver(schedule).observe(doc.body);
 }

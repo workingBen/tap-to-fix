@@ -81,6 +81,12 @@ export class OverlayUI {
     this.sheet.hidden = true;
     this.root = el("div", { class: "root" }, this.pinsLayer, this.bar, this.sheet);
     shadow.append(style, this.root);
+    // Keystrokes in the comment box reach the page retargeted to this host, so the page's
+    // "ignore keys while typing in a field" checks miss them and its shortcuts would fire.
+    // Stop them here. (The overlay's own Escape handler listens in the capture phase first.)
+    for (const type of ["keydown", "keypress", "keyup", "input", "beforeinput"]) {
+      this.host.addEventListener(type, (e) => e.stopPropagation());
+    }
     doc.body.append(this.host);
   }
 
@@ -183,15 +189,15 @@ export class OverlayUI {
   }
 
   /** Closes the sheet. A compose sheet's onCancel runs (removing its unsaved pin) unless
-   *  `cancelled` is false, which is how a successful save will close it. */
-  closeSheet(cancelled = true): void {
+   *  `canceled` is false, which is how a successful save will close it. */
+  closeSheet(canceled = true): void {
     if (this.sheet.hidden) return;
     this.sheet.hidden = true;
     this.sheet.classList.remove("open");
     this.sheet.replaceChildren();
     const cb = this.onSheetClose;
     this.onSheetClose = null;
-    if (cancelled) cb?.();
+    if (canceled) cb?.();
   }
 
   private show(children: Node[], onClose: (() => void) | null): void {
@@ -204,7 +210,4 @@ export class OverlayUI {
     this.sheet.classList.add("open");
   }
 
-  destroy(): void {
-    this.host.remove();
-  }
 }

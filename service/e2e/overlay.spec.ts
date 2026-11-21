@@ -115,6 +115,25 @@ test("cancel removes the unsaved pin", async ({ page }) => {
   await expect(bar(page)).toContainText("0 comments");
 });
 
+test("typing in the comment box does not trigger page shortcuts", async ({ page }) => {
+  await openReady(page);
+  // The fixture's shortcut reacts to "/", "j" and space outside of fields.
+  await page.keyboard.press("j");
+  expect(await page.evaluate(() => document.body.dataset.shortcut)).toBe("j");
+  await page.evaluate(() => delete document.body.dataset.shortcut);
+  await page.locator("h1").tap();
+  const box = sheet(page).locator("textarea");
+  await expect(box).toBeFocused();
+  await page.keyboard.type("j / k and more");
+  await expect(box).toHaveValue("j / k and more");
+  const seen = await page.evaluate(() => ({ ...document.body.dataset }));
+  expect(seen.shortcut).toBeUndefined();
+  expect(seen.pageInput).toBeUndefined();
+  // The overlay's own Escape still works.
+  await page.keyboard.press("Escape");
+  await expect(sheet(page)).toBeHidden();
+});
+
 test("escape cancels the open comment", async ({ page }) => {
   await openReady(page);
   await page.locator("h1").tap();
@@ -182,7 +201,7 @@ test("tapping an existing pin opens the read sheet", async ({ page }) => {
   });
   await owner("PATCH", `/comments/${kept}`, { status: "kept", note: "We like it as it is" });
   await post({
-    body: "This part went away",
+    body: '<img src=x onerror="document.body.dataset.xss=1">',
     selector: "#gone",
     element_text: "Text that is no longer on the page",
     element_x: 0.5,
@@ -197,15 +216,19 @@ test("tapping an existing pin opens the read sheet", async ({ page }) => {
 
   await pins(page).nth(0).tap();
   await expect(sheet(page)).toContainText("Make the heading friendlier");
-  await expect(sheet(page)).toContainText("Kept as is");
+  await expect(sheet(page).locator(".status")).toHaveText("Kept as is");
+  const settledColor = await pins(page).nth(0).locator(".dot").evaluate((el) => getComputedStyle(el).backgroundColor);
+  expect(settledColor).toBe("rgb(47, 107, 79)"); // --acc
   await expect(sheet(page)).toContainText("We like it as it is");
   await sheet(page).getByRole("button", { name: "Close" }).tap();
   await expect(sheet(page)).toBeHidden();
 
   await pins(page).nth(1).tap();
-  await expect(sheet(page)).toContainText("This part went away");
-  await expect(sheet(page)).toContainText("Open");
+  await expect(sheet(page).locator(".body")).toHaveText('<img src=x onerror="document.body.dataset.xss=1">');
+  await expect(sheet(page).locator(".status")).toHaveText("Open");
+  await expect(sheet(page).locator(".note")).toHaveCount(0);
   await expect(sheet(page)).toContainText("moved");
+  expect(await page.evaluate(() => document.body.dataset.xss)).toBeUndefined();
   await sheet(page).getByRole("button", { name: "Close" }).tap();
   expect(new URL(page.url()).pathname).toBe("/index.html");
 });

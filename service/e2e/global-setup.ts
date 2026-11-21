@@ -20,11 +20,16 @@ function launch(cmd: string, args: string[], env: Record<string, string>): Child
   return child;
 }
 
-function kill(child: ChildProcess): void {
-  if (child.pid === undefined || child.exitCode !== null) return;
+/** SIGTERM the child's process group and wait (up to 5 s) for it to exit, so ports are free. */
+async function kill(child: ChildProcess): Promise<void> {
+  if (child.pid === undefined || child.exitCode !== null || child.signalCode !== null) return;
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
   try {
     process.kill(-child.pid, "SIGTERM");
-  } catch {}
+  } catch {
+    return;
+  }
+  await Promise.race([exited, new Promise((r) => setTimeout(r, 5000))]);
 }
 
 async function portFree(url: string): Promise<boolean> {
@@ -66,7 +71,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
   const tmp = mkdtempSync(join(tmpdir(), "ttf-e2e-"));
   const children: ChildProcess[] = [];
   const teardown = async () => {
-    children.forEach(kill);
+    await Promise.all(children.map(kill));
     rmSync(tmp, { recursive: true, force: true });
   };
   try {
