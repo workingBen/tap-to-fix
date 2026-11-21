@@ -1,6 +1,6 @@
 // Bundles the browser code into public/. Run: node scripts/build-client.mjs [--watch]
 import { context, build } from "esbuild";
-import { mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -9,11 +9,20 @@ const common = { absWorkingDir: root, bundle: true, minify: true, target: "es202
 const targets = [
   { ...common, entryPoints: ["client/loader-entry.ts"], outfile: "public/t.js", format: "iife" },
   { ...common, entryPoints: ["client/overlay/index.ts"], outfile: "public/overlay.js", format: "esm" },
+  { ...common, entryPoints: ["client/dash/reviewer.ts"], outfile: "public/r/app.js", format: "esm" },
+  { ...common, entryPoints: ["client/dash/owner.ts"], outfile: "public/o/app.js", format: "esm" },
 ];
 
 // Cross-origin import() of overlay.js needs CORS; Workers assets honor public/_headers.
 mkdirSync(join(root, "public"), { recursive: true });
-writeFileSync(join(root, "public", "_headers"), "/*.js\n  Access-Control-Allow-Origin: *\n");
+mkdirSync(join(root, "public", "r"), { recursive: true });
+mkdirSync(join(root, "public", "o"), { recursive: true });
+copyFileSync(join(root, "client/pages/r.html"), join(root, "public/r/index.html"));
+copyFileSync(join(root, "client/pages/o.html"), join(root, "public/o/index.html"));
+writeFileSync(
+  join(root, "public", "_headers"),
+  "/*\n  Referrer-Policy: no-referrer\n/*.js\n  Access-Control-Allow-Origin: *\n",
+);
 
 if (process.argv.includes("--watch")) {
   for (const t of targets) await (await context(t)).watch();

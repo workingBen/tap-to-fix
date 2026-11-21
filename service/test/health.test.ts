@@ -7,6 +7,7 @@ describe("scaffold", () => {
     const res = await call("/api/health");
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ ok: true });
+    expect(res.headers.get("Referrer-Policy")).toBe("no-referrer");
   });
 
   it("returns errors as {error}", async () => {
