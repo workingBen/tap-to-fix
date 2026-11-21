@@ -53,6 +53,21 @@ describe("assignments", () => {
     expect((await post(env, "/api/owner/assignments", { site: site.slug, reviewer_id: reviewer.id, path: "/a" })).status).toBe(400);
   });
 
+  it("400s a path containing ? or #", async () => {
+    const { env, site, reviewer } = await setup();
+    for (const path of ["/a?x=1", "/a#top"]) {
+      expect((await post(env, "/api/owner/assignments", { site: site.slug, reviewer_id: reviewer.id, path, title: "A" })).status).toBe(400);
+    }
+  });
+
+  it("creates the lookup indexes", async () => {
+    const { env } = await setup();
+    const { results } = await env.DB.prepare("SELECT name FROM sqlite_master WHERE type = 'index'").all<{ name: string }>();
+    const names = results.map((r) => r.name);
+    expect(names).toContain("idx_comments_assignment");
+    expect(names).toContain("idx_assignments_reviewer");
+  });
+
   it("deletes an assignment with its comments and screenshots", async () => {
     const { env, site, reviewer } = await setup();
     const a = await json(await post(env, "/api/owner/assignments", { site: site.slug, reviewer_id: reviewer.id, path: "/a", title: "A" }));
@@ -89,8 +104,8 @@ describe("overview", () => {
 
     const rc = ov.reviewers.find((r: any) => r.id === reviewer.id); // eslint-disable-line @typescript-eslint/no-explicit-any
     const dana = ov.reviewers.find((r: any) => r.id === other.id); // eslint-disable-line @typescript-eslint/no-explicit-any
-    expect(rc).toEqual({ id: reviewer.id, name: "Chris", revoked: false, open_count: 2, ready_count: 1 });
-    expect(dana).toMatchObject({ revoked: true, open_count: 1, ready_count: 0 });
+    expect(rc).toEqual({ id: reviewer.id, name: "Chris", revoked: false, unsettled_count: 2, ready_count: 1 });
+    expect(dana).toMatchObject({ revoked: true, unsettled_count: 1, ready_count: 0 });
 
     const by = (id: string) => ov.assignments.find((x: any) => x.id === id); // eslint-disable-line @typescript-eslint/no-explicit-any
     expect(by(a1.id)).toMatchObject({

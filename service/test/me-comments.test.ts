@@ -48,7 +48,17 @@ describe("POST /api/me/comments", () => {
       .first<any>(); // eslint-disable-line @typescript-eslint/no-explicit-any
     expect(row.screenshot_key).toBe(`shots/greensprings/${out.id}.png`);
     expect(row.status).toBe("open");
-    expect(row.status_changed_at).toBe(row.created_at);
+    expect(row.status_changed_at).toBeNull();
+  });
+
+  it("a reviewer's own new comment does not flag the page as updated", async () => {
+    const { env, a } = await setup();
+    const mine = (await json(await reviewerFetch(env, a.token, "/api/me"))).assignments[0];
+    await reviewerFetch(env, a.token, `/api/me/assignments/${mine.id}/opened`, { method: "POST" });
+    await new Promise((r) => setTimeout(r, 5));
+    expect((await post(env, a.token, form(base))).status).toBe(201);
+    const after = (await json(await reviewerFetch(env, a.token, "/api/me"))).assignments[0];
+    expect(after.is_updated).toBe(false);
   });
 
   it("reports none without a file", async () => {
@@ -78,6 +88,39 @@ describe("POST /api/me/comments", () => {
     expect((await json(res)).screenshot).toBe("dropped");
   });
 
+  it("403 when another registered site's origin posts to this site's assignment", async () => {
+    const { env, a } = await setup();
+    await seedSite(env, { slug: "other", name: "Other", origin: "https://other.example", repo: "x/y" });
+    const res = await post(env, a.token, form(base), { Origin: "https://other.example" });
+    expect(res.status).toBe(403);
+    const n = await env.DB.prepare("SELECT COUNT(*) AS n FROM comments").first<{ n: number }>();
+    expect(n!.n).toBe(0);
+  });
+
+  it("drops the screenshot but saves the comment when R2 put throws", async () => {
+    const { env, a } = await setup();
+    env.SHOTS.put = async () => {
+      throw new Error("r2 down");
+    };
+    const res = await post(env, a.token, form(base, { bytes: png, type: "image/png" }));
+    expect(res.status).toBe(201);
+    const out = await json(res);
+    expect(out.screenshot).toBe("dropped");
+    const row = await env.DB.prepare("SELECT screenshot_key FROM comments WHERE id = ?").bind(out.id).first<any>(); // eslint-disable-line @typescript-eslint/no-explicit-any
+    expect(row).not.toBeNull();
+    expect(row.screenshot_key).toBeNull();
+  });
+
+  it("drops a zero-byte screenshot but saves the comment", async () => {
+    const { env, a } = await setup();
+    const res = await post(env, a.token, form(base, { bytes: new Uint8Array(0), type: "image/png" }));
+    expect(res.status).toBe(201);
+    const out = await json(res);
+    expect(out.screenshot).toBe("dropped");
+    const row = await env.DB.prepare("SELECT screenshot_key FROM comments WHERE id = ?").bind(out.id).first<any>(); // eslint-disable-line @typescript-eslint/no-explicit-any
+    expect(row.screenshot_key).toBeNull();
+  });
+
   it("403 for an unassigned path", async () => {
     const { env, a } = await setup();
     const res = await post(env, a.token, form({ ...base, path: "/nope" }));
@@ -89,6 +132,7 @@ describe("POST /api/me/comments", () => {
     const res = await post(env, a.token, form(base), { Origin: "https://evil.example" });
     expect(res.status).toBe(403);
     expect(res.headers.get("Access-Control-Allow-Origin")).toBeNull();
+    expect(res.headers.get("Vary")).toContain("Origin");
   });
 
   it("allows the registered origin and echoes it", async () => {
@@ -153,6 +197,7 @@ describe("GET /api/me/comments/:id/screenshot", () => {
     const ok = await reviewerFetch(env, a.token, `/api/me/comments/${out.id}/screenshot`);
     expect(ok.status).toBe(200);
     expect(ok.headers.get("Content-Type")).toBe("image/png");
+    expect(ok.headers.get("X-Content-Type-Options")).toBe("nosniff");
     expect(new Uint8Array(await ok.arrayBuffer())).toEqual(png);
     const other = await reviewerFetch(env, b.token, `/api/me/comments/${out.id}/screenshot`);
     expect(other.status).toBe(404);

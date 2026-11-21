@@ -13,6 +13,7 @@ app.route("/api/me", me);
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 
 app.onError((err, c) => {
+  console.error(err);
   const status = "status" in err && typeof err.status === "number" ? err.status : 500;
   const message = status === 500 ? "Internal error" : err.message;
   return c.json({ error: message }, status as 400 | 401 | 403 | 404 | 500);

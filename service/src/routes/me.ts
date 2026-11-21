@@ -11,12 +11,12 @@ const me = new Hono<AppBindings>();
 const cors = createMiddleware<AppBindings>(async (c, next) => {
   const origin = c.req.header("Origin");
   if (origin) {
+    c.header("Vary", "Origin");
     const known = await c.env.DB.prepare("SELECT 1 AS ok FROM sites WHERE origin = ?")
       .bind(origin)
       .first<{ ok: number }>();
     if (known) {
       c.header("Access-Control-Allow-Origin", origin);
-      c.header("Vary", "Origin");
       if (c.req.method === "OPTIONS") {
         c.header("Access-Control-Allow-Methods", "GET, POST, OPTIONS");
         c.header("Access-Control-Allow-Headers", "Authorization, Content-Type");
@@ -202,14 +202,14 @@ me.post("/comments", async (c) => {
 
   await c.env.DB.prepare(
     `INSERT INTO comments (id, assignment_id, body, status, selector, element_text, element_x, element_y,
-                           page_x, page_y, viewport_w, viewport_h, device, screenshot_key, created_at, status_changed_at)
-     VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           page_x, page_y, viewport_w, viewport_h, device, screenshot_key, created_at)
+     VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
   )
     .bind(
       id, row.id, body,
       str(input.selector), str(input.element_text), num(input.element_x), num(input.element_y),
       num(input.page_x), num(input.page_y), num(input.viewport_w), num(input.viewport_h),
-      str(input.device), key, now, now,
+      str(input.device), key, now,
     )
     .run();
   return c.json({ id, screenshot }, 201);
@@ -229,6 +229,7 @@ me.get("/comments/:id/screenshot", async (c) => {
     headers: {
       "Content-Type": obj.httpMetadata?.contentType ?? "application/octet-stream",
       "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
     },
   });
 });

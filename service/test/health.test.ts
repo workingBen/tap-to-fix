@@ -1,4 +1,5 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
+import { ownerFetch } from "./helpers";
 import { call, makeEnv } from "./env";
 
 describe("scaffold", () => {
@@ -12,6 +13,22 @@ describe("scaffold", () => {
     const res = await call("/api/nope");
     expect(res.status).toBe(404);
     expect(await res.json()).toEqual({ error: "Not found" });
+  });
+
+  it("logs the error and returns a generic 500", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const env = makeEnv();
+      env.DB.prepare = () => {
+        throw new Error("boom");
+      };
+      const res = await ownerFetch(env, "/api/owner/sites");
+      expect(res.status).toBe(500);
+      expect(await res.json()).toEqual({ error: "Internal error" });
+      expect(spy).toHaveBeenCalled();
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   it("has the schema tables", async () => {

@@ -114,6 +114,7 @@ owner.post("/assignments", async (c) => {
     return c.json({ error: "site, reviewer_id, path and title are required" }, 400);
   }
   if (!path.startsWith("/")) return c.json({ error: "path must start with /" }, 400);
+  if (/[?#]/.test(path)) return c.json({ error: "path must not contain ? or #" }, 400);
   const siteRow = await c.env.DB.prepare("SELECT slug FROM sites WHERE slug = ?").bind(site).first();
   const reviewerRow = await c.env.DB.prepare("SELECT id FROM reviewers WHERE id = ?").bind(reviewerId).first();
   if (!siteRow || !reviewerRow) return c.json({ error: "Not found" }, 404);
@@ -205,8 +206,8 @@ owner.get("/overview", async (c) => {
   });
 
   const reviewers = reviewerRows.results.map((r) => {
-    const ready = readyByReviewer.get(r.id) ?? 0; // open_count counts unsettled (open + in progress); ready_count only open
-    return { id: r.id, name: r.name, revoked: r.revoked_at !== null, open_count: unsettledByReviewer.get(r.id) ?? 0, ready_count: ready };
+    const ready = readyByReviewer.get(r.id) ?? 0; // unsettled_count counts unsettled (open + in progress); ready_count only open
+    return { id: r.id, name: r.name, revoked: r.revoked_at !== null, unsettled_count: unsettledByReviewer.get(r.id) ?? 0, ready_count: ready };
   });
   return c.json({ reviewers, assignments });
 });
@@ -225,15 +226,22 @@ owner.get("/batch", async (c) => {
     .first<{ slug: string; name: string; origin: string; repo: string }>();
   if (!reviewer || !site) return c.json({ error: "Not found" }, 404);
 
+  const statusParam = c.req.query("status");
+  const wanted = statusParam === undefined ? ["open"] : statusParam.split(",").map((s) => s.trim());
+  if (!wanted.every((s): s is Status => STATUSES.includes(s as Status))) {
+    return c.json({ error: "Unknown status" }, 400);
+  }
+  const placeholders = wanted.map(() => "?").join(", ");
+
   const { results } = await c.env.DB.prepare(
     `SELECT c.id, a.path, a.title, c.body, c.status, c.selector, c.element_text, c.element_x, c.element_y,
             c.page_x, c.page_y, c.viewport_w, c.viewport_h, c.device,
             c.screenshot_key IS NOT NULL AS has_screenshot, c.created_at
        FROM comments c JOIN assignments a ON a.id = c.assignment_id
-      WHERE a.reviewer_id = ? AND a.site_slug = ? AND c.status = 'open'
+      WHERE a.reviewer_id = ? AND a.site_slug = ? AND c.status IN (${placeholders})
       ORDER BY c.created_at, c.id`,
   )
-    .bind(reviewer.id, site.slug)
+    .bind(reviewer.id, site.slug, ...wanted)
     .all<Record<string, unknown>>();
 
   return c.json({
@@ -265,6 +273,7 @@ owner.patch("/comments/:id", async (c) => {
   if (!status || !STATUSES.includes(status)) return c.json({ error: "Unknown status" }, 400);
   const note = str(body?.note);
   const prUrl = str(body?.pr_url);
+  const clearPrUrl = body !== null && body.pr_url === null;
   if ((status === "later" || status === "kept") && !note) {
     return c.json({ error: "A note is required for later and kept" }, 400);
   }
@@ -280,8 +289,8 @@ owner.patch("/comments/:id", async (c) => {
   )
     .bind(
       status,
-      note ?? row.note,
-      prUrl ?? row.pr_url,
+      status === "later" || status === "kept" ? (note ?? row.note) : null,
+      clearPrUrl ? null : (prUrl ?? row.pr_url),
       changed ? new Date().toISOString() : row.status_changed_at,
       id,
     )

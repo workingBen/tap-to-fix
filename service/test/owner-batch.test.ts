@@ -54,11 +54,27 @@ describe("owner batch and status API", () => {
     expect((await ownerFetch(env, `/api/owner/batch?reviewer=${a.id}&site=nope`)).status).toBe(404);
   });
 
+  it("batch filters by status: default open, comma list, 400 for unknown", async () => {
+    const { env, a, comment } = await setup();
+    const c1 = await comment(a.token, "open one");
+    const c2 = await comment(a.token, "wip one");
+    const c3 = await comment(a.token, "done one");
+    await ownerFetch(env, `/api/owner/comments/${c2}`, { method: "PATCH", body: JSON.stringify({ status: "in_progress" }) });
+    await ownerFetch(env, `/api/owner/comments/${c3}`, { method: "PATCH", body: JSON.stringify({ status: "done" }) });
+    const ids = async (q: string) =>
+      (await json(await ownerFetch(env, `/api/owner/batch?reviewer=${a.id}&site=greensprings${q}`))).comments.map((c: any) => c.id).sort(); // eslint-disable-line @typescript-eslint/no-explicit-any
+    expect(await ids("")).toEqual([c1]);
+    expect(await ids("&status=open,in_progress")).toEqual([c1, c2].sort());
+    const wip = await json(await ownerFetch(env, `/api/owner/batch?reviewer=${a.id}&site=greensprings&status=in_progress`));
+    expect(wip.comments[0].status).toBe("in_progress");
+    expect((await ownerFetch(env, `/api/owner/batch?reviewer=${a.id}&site=greensprings&status=open,bogus`)).status).toBe(400);
+    expect((await ownerFetch(env, `/api/owner/batch?reviewer=${a.id}&site=greensprings&status=`)).status).toBe(400);
+  });
+
   it("PATCH updates status, pr_url and status_changed_at, and flags the reviewer's page as updated", async () => {
     const { env, a, comment } = await setup();
     const id = await comment(a.token, "fix");
     await env.DB.prepare("UPDATE assignments SET last_opened_at = ?").bind("2000-01-01T00:00:00.000Z").run();
-    await env.DB.prepare("UPDATE comments SET status_changed_at = ? WHERE id = ?").bind("1999-01-01T00:00:00.000Z", id).run();
     const isUpdated = async () => (await json(await reviewerFetch(env, a.token, "/api/me"))).assignments[0].is_updated;
     expect(await isUpdated()).toBe(false);
 
@@ -76,10 +92,10 @@ describe("owner batch and status API", () => {
     expect(second.status).toBe("done");
     expect(second.pr_url).toBe("https://github.com/x/y/pull/1");
 
-    // Same status: note/pr_url update, timestamp unchanged.
+    // Same status: pr_url kept, note dropped (done carries no note), timestamp unchanged.
     res = await ownerFetch(env, `/api/owner/comments/${id}`, { method: "PATCH", body: JSON.stringify({ status: "done", note: "n" }) });
     const third = await json(res);
-    expect(third.note).toBe("n");
+    expect(third.note).toBeNull();
     expect(third.pr_url).toBe("https://github.com/x/y/pull/1");
     expect(third.status_changed_at).toBe(second.status_changed_at);
   });
@@ -95,6 +111,26 @@ describe("owner batch and status API", () => {
     expect((await patch(id, {})).status).toBe(400);
     expect((await patch(id, { status: "later", note: "next sprint" })).status).toBe(200);
     expect((await patch("missing", { status: "done" })).status).toBe(404);
+  });
+
+  it("clears the note when moving off later/kept, and pr_url only on explicit null", async () => {
+    const { env, a, comment } = await setup();
+    const id = await comment(a.token, "fix");
+    const patch = async (body: unknown) =>
+      json(await ownerFetch(env, `/api/owner/comments/${id}`, { method: "PATCH", body: JSON.stringify(body) }));
+    const later = await patch({ status: "later", note: "next sprint", pr_url: "https://github.com/x/y/pull/9" });
+    expect(later.note).toBe("next sprint");
+    const open = await patch({ status: "open" });
+    expect(open.note).toBeNull();
+    expect(open.pr_url).toBe("https://github.com/x/y/pull/9"); // omitted keeps it
+    const cleared = await patch({ status: "open", pr_url: null });
+    expect(cleared.pr_url).toBeNull();
+  });
+
+  it("rejects a reviewer token on an owner route with 401", async () => {
+    const { env, a } = await setup();
+    const res = await reviewerFetch(env, a.token, `/api/owner/batch?reviewer=${a.id}&site=greensprings`);
+    expect(res.status).toBe(401);
   });
 
   it("serves the screenshot bytes to the owner, 404 when none", async () => {

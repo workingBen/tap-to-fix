@@ -46,3 +46,6 @@ CREATE TABLE comments (
   created_at TEXT,
   status_changed_at TEXT
 );
+
+CREATE INDEX idx_comments_assignment ON comments(assignment_id);
+CREATE INDEX idx_assignments_reviewer ON assignments(reviewer_id);
