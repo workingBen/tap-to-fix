@@ -55,16 +55,19 @@ cd "<service dir>" && (test -f ~/.nvm/nvm.sh && . ~/.nvm/nvm.sh && nvm use >/dev
 
 Add ` -- --rotate-token` after `npm run deploy` only if the user asked for it. It takes a minute or two.
 
-Exit codes: `0` deployed and smoke-tested, `1` error (the message says which step), `3` not signed in to Cloudflare.
+Exit codes: `0` deployed and checked live, `1` error (the message says which step), `3` not signed in to Cloudflare (or offline).
 
-- **Exit `3`:** say: *"You're not signed in to Cloudflare. Type this, and a browser opens to sign in:"* then give the line `! cd "<service dir>" && npx wrangler login` with the literal path in it. Wait until the user says it worked, then run step 3 again.
+- **Exit `3`:** say: *"You're not signed in to Cloudflare (or this machine is offline). Type this, and a browser opens to sign in:"* then give the line `! cd "<service dir>" && npx wrangler login` with the literal path in it. Wait until the user says it worked, then run step 3 again.
 - **Exit `1`, "more than one Cloudflare account":** show the accounts it listed and ask which one to use. Then run step 3 with `CLOUDFLARE_ACCOUNT_ID=<id>` in front of `npm run deploy`. Never pick one yourself.
-- **Exit `1`, the smoke test failed:** the Worker is deployed and the config is saved, but something is wrong. Show the failure lines. If the script says the saved token does not match, offer to run again with `--rotate-token`. Otherwise stop and report.
+- **Exit `1`, "the saved owner token doesn't match the deployed one":** offer to run step 3 again with `-- --rotate-token`. Say that this issues a new owner link and the old one stops working.
+- **Exit `1`, any other "live check" line:** the Worker is deployed and the config is saved, but a check failed. Show the `live check:` lines and stop.
+- **Exit `1`, CLOUDFLARE_ENV is set, or `npm ci` is needed:** do what the message says (step 2 runs `npm ci`), then run step 3 again.
+- **Exit `1`, "couldn't read the D1 (or R2) list":** pass the message on as it is. It asks the user to run the list command themselves. Do not run it yourself, because its output names the account's other resources.
 - **Exit `1`, anything else:** show the error and stop. Do not retry in a loop.
 
-## 4. Smoke test data
+## 4. The live check
 
-The deploy ends with a smoke test against the live service. It removes its own test page and comment and revokes its test reviewer afterwards. The API cannot delete a site, so a site named "Smoke" (slug `smoke-…`) stays on the owner dashboard, one per run. Mention that once, so the user is not surprised.
+The deploy ends with a read-only check of the live service. It loads the health endpoint, `t.js` (which must allow any origin), the reviewer page `/r/` (which must send `Referrer-Policy: no-referrer`) and the owner overview, once without the token (which must be refused) and once with it. It writes nothing, so no test data is left on the owner dashboard. The token travels only in a request header, never on a command line.
 
 ## 5. Hand over the script tag and the owner link — once
 
