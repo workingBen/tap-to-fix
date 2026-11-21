@@ -1,6 +1,7 @@
 // Helpers shared by the reviewer (/r/) and owner (/o/) dashboards.
 
-export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number };
+/** `error` is the service's own `{ "error": "..." }` message, when it sent one. */
+export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error?: string };
 
 /** Hash first (and remember it), then storage. All storage access is guarded. */
 export function readToken(win: Window, hashKey: "ttf" | "owner", storageKey: string): string | null {
@@ -44,7 +45,15 @@ export async function api<T>(
   }
   try {
     const res = await fetch(path, { ...rest, headers, body });
-    if (!res.ok) return { ok: false, status: res.status };
+    if (!res.ok) {
+      let error: unknown;
+      try {
+        error = ((await res.json()) as { error?: unknown } | null)?.error;
+      } catch {
+        /* not JSON */
+      }
+      return typeof error === "string" && error ? { ok: false, status: res.status, error } : { ok: false, status: res.status };
+    }
     const text = await res.text();
     return { ok: true, data: (text ? JSON.parse(text) : null) as T };
   } catch {
