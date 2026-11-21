@@ -1,5 +1,6 @@
 import { Hono } from "hono";
 import type { Env } from "./env";
+import me from "./routes/me";
 import owner from "./routes/owner";
 
 const app = new Hono<{ Bindings: Env }>();
@@ -7,6 +8,7 @@ const app = new Hono<{ Bindings: Env }>();
 app.get("/api/health", (c) => c.json({ ok: true }));
 
 app.route("/api/owner", owner);
+app.route("/api/me", me);
 
 app.notFound((c) => c.json({ error: "Not found" }, 404));
 

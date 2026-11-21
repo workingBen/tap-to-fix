@@ -4,7 +4,7 @@ import { hashToken } from "./ids";
 
 export type AppBindings = {
   Bindings: Env;
-  Variables: { reviewer: { id: string; name: string } };
+  Variables: { reviewer: { id: string; name: string; token: string } };
 };
 
 function bearer(header: string | undefined): string | null {
@@ -43,6 +43,6 @@ export const requireReviewer = createMiddleware<AppBindings>(async (c, next) => 
     .bind(await hashToken(token))
     .first<{ id: string; name: string }>();
   if (!row) return c.json({ error: "Unauthorized" }, 401);
-  c.set("reviewer", { id: row.id, name: row.name });
+  c.set("reviewer", { id: row.id, name: row.name, token });
   await next();
 });
