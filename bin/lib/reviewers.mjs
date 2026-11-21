@@ -2,7 +2,7 @@ export class AmbiguousReviewer extends Error {
   constructor(arg, matches) {
     super(
       `"${arg}" matches more than one reviewer: ` +
-        matches.map((m) => `${m.name} (${slug(m.name)})`).join(", ") +
+        matches.map((m) => `${m.name} (${slug(m.name)}, id ${m.id})`).join(", ") +
         ". Use the full-name slug or the id.",
     );
     this.name = "AmbiguousReviewer";

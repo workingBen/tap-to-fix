@@ -15,6 +15,7 @@ export class NetworkError extends Error {
 
 export function client(cfg, fetchImpl = fetch) {
   const base = cfg.service.replace(/\/+$/, "");
+  const redact = (text) => (cfg.owner_token ? String(text).split(cfg.owner_token).join("[redacted]") : String(text));
 
   async function send(path, init = {}) {
     const headers = new Headers(init.headers);
@@ -25,7 +26,7 @@ export function client(cfg, fetchImpl = fetch) {
       res = await fetchImpl(new Request(base + path, { ...init, headers }));
     } catch (e) {
       // Never include the request (it carries the token) in the message.
-      throw new NetworkError("Could not reach " + base + (e instanceof Error && e.message ? " (" + e.message + ")" : ""));
+      throw new NetworkError("Could not reach " + base + (e instanceof Error && e.message ? " (" + redact(e.message) + ")" : ""));
     }
     if (!res.ok) {
       let message = "HTTP " + res.status;
@@ -35,12 +36,19 @@ export function client(cfg, fetchImpl = fetch) {
       } catch {
         // not JSON
       }
-      throw new ApiError(res.status, message);
+      throw new ApiError(res.status, redact(message));
     }
     return res;
   }
 
-  const json = async (path, init) => (await send(path, init)).json();
+  const json = async (path, init) => {
+    const res = await send(path, init);
+    try {
+      return await res.json();
+    } catch {
+      throw new ApiError(res.status, "The service returned a response that is not JSON");
+    }
+  };
 
   return {
     overview: () => json("/api/owner/overview"),
