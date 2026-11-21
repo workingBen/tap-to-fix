@@ -65,7 +65,7 @@ describe("requireReviewer", () => {
     await seedReviewer(env, token);
     const res = await get(env, "/me", { Authorization: `Bearer ${token}` });
     expect(res.status).toBe(200);
-    expect(await res.json()).toEqual({ id: "r1", name: "Alexis" });
+    expect(await res.json()).toEqual({ id: "r1", name: "Alexis", token });
   });
   it("200 via ?ttf=", async () => {
     const env = makeEnv();
