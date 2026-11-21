@@ -71,6 +71,7 @@ try {
   for (const [name, viewport, mobile] of [
     ["o-1440.png", { width: 1440, height: 900 }, false],
     ["o-1280.png", { width: 1280, height: 800 }, false],
+    ["o-1200.png", { width: 1200, height: 800 }, false],
     ["o-390.png", { width: 390, height: 844 }, true],
   ] as const) {
     const ctx = await browser.newContext({ viewport, deviceScaleFactor: mobile ? 3 : 1, isMobile: mobile, hasTouch: mobile });

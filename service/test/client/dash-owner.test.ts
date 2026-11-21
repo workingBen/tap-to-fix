@@ -58,6 +58,14 @@ describe("fixCommand / reviewerLink / prLabel", () => {
     expect(prLabel("https://github.com/a/b/pull/42/files")).toBe("PR #42");
     expect(prLabel("https://example.com/change/9")).toBe("PR");
   });
+  it("a javascript: PR URL is shown as text, never as a link", () => {
+    const html = renderOwner(
+      state({ overview: { reviewers: [ALEXIS], assignments: [a({ pr_urls: ["javascript:alert(1)//pull/7"] })] } }),
+    );
+    expect(html).not.toContain("javascript:");
+    expect(html).toContain('<span class="lnk plain">');
+    expect(html).toContain("PR #7");
+  });
 });
 
 describe("readyBatches", () => {
@@ -139,6 +147,13 @@ describe("renderOwner", () => {
     );
     expect(html).toContain("Alexis has 7 comments ready for a review cycle on Bonus Decade");
     expect(html).toContain("/tap-to-fix:fix alexis bonus-decade");
+    // The command breaks only at spaces: each word is kept whole, and the copied text is exact.
+    const box = document.createElement("div");
+    box.innerHTML = html;
+    const code = box.querySelector("[data-ready] code")!;
+    expect(code.textContent).toBe("/tap-to-fix:fix alexis bonus-decade");
+    expect([...code.querySelectorAll(".tok")].map((t) => t.textContent)).toEqual(["/tap-to-fix:fix", "alexis", "bonus-decade"]);
+    expect(box.querySelector("[data-ready] [data-copy]")!.getAttribute("data-copy")).toBe("/tap-to-fix:fix alexis bonus-decade");
   });
   it("revoked reviewers say Link off; selecting one filters and shows the link controls", () => {
     const chris = { ...ALEXIS, id: "r2", name: "Chris Tosswill", revoked: true };
@@ -186,6 +201,39 @@ describe("mountOwner", () => {
     await mountOwner(window);
     expect(document.body.textContent).toContain("Paste your owner token");
     expect(localStorage.getItem("ttf:owner-token")).toBeNull();
+  });
+  it("when the clipboard is refused, Copy in the link flash selects the link itself", async () => {
+    history.replaceState(null, "", "/o/#owner=tok");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string, init?: RequestInit) => {
+        if (path === "/api/owner/reviewers" && init?.method === "POST") {
+          return new Response('{"id":"r9","name":"Shawn Smith","token":"secret-token"}', { status: 201 });
+        }
+        if (path.endsWith("/sites")) return new Response("[]", { status: 200 });
+        return new Response('{"reviewers":[{"id":"r9","name":"Shawn Smith","revoked":false,"unsettled_count":0,"ready_count":0}],"assignments":[]}', { status: 200 });
+      }),
+    );
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: { writeText: () => Promise.reject(new Error("denied")) },
+    });
+    const exec = vi.fn(() => false);
+    Object.defineProperty(document, "execCommand", { configurable: true, value: exec });
+    await mountOwner(window);
+
+    const form = document.querySelector("form[data-form=reviewer]") as HTMLFormElement;
+    (form.querySelector("input[name=name]") as HTMLInputElement).value = "Shawn Smith";
+    form.dispatchEvent(new Event("submit", { bubbles: true, cancelable: true }));
+    await vi.waitFor(() => expect(document.querySelector("[data-flash]")).not.toBeNull());
+
+    const link = `${location.origin}/r/#ttf=secret-token`;
+    expect(document.querySelector("[data-flash-url]")!.textContent).toBe(link);
+    const button = document.querySelector("[data-flash] [data-copy]") as HTMLButtonElement;
+    button.click();
+    await vi.waitFor(() => expect(button.textContent).toBe("Select and copy the link"));
+    expect(window.getSelection()!.toString()).toBe(link);
+    expect(window.getSelection()!.toString()).not.toBe("Copy");
   });
   it("takes the token out of the address bar once stored", async () => {
     history.replaceState(null, "", "/o/#owner=tok");

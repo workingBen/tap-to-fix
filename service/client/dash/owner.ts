@@ -44,6 +44,16 @@ export function reviewerLink(origin: string, token: string): string {
   return `${origin}/r/#ttf=${token}`;
 }
 
+/** Only http(s) URLs become links; anything else (javascript:, data:) is shown as text. */
+export function isWebUrl(url: string): boolean {
+  try {
+    const p = new URL(url).protocol;
+    return p === "https:" || p === "http:";
+  } catch {
+    return false;
+  }
+}
+
 export function prLabel(url: string): string {
   const m = /\/pull\/(\d+)/.exec(url);
   return m ? `PR #${m[1]}` : "PR";
@@ -127,7 +137,10 @@ function readyHtml(batches: ReadyBatch[]): string {
         (b) =>
           `<div class="ready" data-ready>` +
           `<p class="ready-h">${esc(firstName(b.reviewerName))} has ${plural(b.open, "comment", "comments")} ready for a review cycle on ${esc(b.siteName)}</p>` +
-          `<div class="cmd"><code>${esc(b.command)}</code>${copyButton(b.command)}</div>` +
+          `<div class="cmd"><code>${b.command
+            .split(" ")
+            .map((t) => `<span class="tok">${esc(t)}</span>`)
+            .join(" ")}</code>${copyButton(b.command)}</div>` +
           `</div>`,
       )
       .join("") +
@@ -209,7 +222,11 @@ function rowHtml(a: OwnerAssignment, site: Site | undefined): string {
       ? `<a class="lnk" href="${esc(site.origin + a.path)}" target="_blank" rel="noopener noreferrer">${OUT}<span>Page</span></a>`
       : "") +
     a.pr_urls
-      .map((u) => `<a class="lnk" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${PR}<span>${esc(prLabel(u))}</span></a>`)
+      .map((u) =>
+        isWebUrl(u)
+          ? `<a class="lnk" href="${esc(u)}" target="_blank" rel="noopener noreferrer">${PR}<span>${esc(prLabel(u))}</span></a>`
+          : `<span class="lnk plain">${PR}<span>${esc(prLabel(u))}</span></span>`,
+      )
       .join("");
   const label = `Remove ${a.title} from ${firstName(a.reviewer.name)}'s list`;
   return (
@@ -297,11 +314,11 @@ main { max-width: 1240px; padding-top: 28px; }
 .a-ready { grid-area: ready; } .a-side { grid-area: side; } .a-pages { grid-area: pages; } .a-sites { grid-area: sites; }
 .a-ready:empty { display: none; }
 .h { font: 600 26px/1.2 var(--hf); margin: 0; letter-spacing: -0.01em; }
-.lbl { font-size: 15px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--mut); margin: 0 0 8px; }
+.lbl { font-size: 17px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--mut); margin: 0 0 8px; }
 .empty { font: 400 19px/1.45 var(--hf); color: var(--mut); margin: 16px 0 0; }
 .tt { font: 600 19px/1.3 var(--hf); overflow-wrap: anywhere; }
 .tu { font-size: 17px; line-height: 1.4; color: var(--mut); overflow-wrap: anywhere; }
-.path, code { font-family: ui-monospace, Menlo, monospace; font-size: 16px; }
+.path, code { font-family: ui-monospace, Menlo, monospace; font-size: 17px; }
 .part { white-space: nowrap; }
 button { font: inherit; color: inherit; }
 
@@ -319,10 +336,11 @@ button { font: inherit; color: inherit; }
 .ready-h { margin: 0; font: 600 20px/1.35 var(--hf); }
 .cmd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .cmd code, .flash-url {
-  font-size: 16px; font-weight: 600; background: var(--surf); border: 1px solid var(--line); border-radius: 8px;
+  font-size: 17px; font-weight: 600; background: var(--surf); border: 1px solid var(--line); border-radius: 8px;
   padding: 10px 12px; overflow-wrap: break-word; min-width: 0; user-select: all;
 }
-.cmd code { flex: 1 1 auto; }
+.cmd code { flex: 1 1 auto; overflow-wrap: normal; overflow-x: auto; }
+.cmd .tok { white-space: nowrap; hyphens: none; }
 
 /* reviewers */
 .rv-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
@@ -333,7 +351,7 @@ button { font: inherit; color: inherit; }
 }
 .rv:hover { background: var(--surf); }
 .rv-item.sel .rv { background: var(--soft); }
-.av { grid-area: av; width: 34px; height: 34px; border-radius: 50%; background: var(--ink); color: var(--bg); display: grid; place-items: center; font-weight: 700; font-size: 16px; }
+.av { grid-area: av; width: 34px; height: 34px; border-radius: 50%; background: var(--ink); color: var(--bg); display: grid; place-items: center; font-weight: 700; font-size: 17px; }
 .rv-item.sel .av { background: var(--acc); color: var(--acc-ink); }
 .rv-n { grid-area: n; font-weight: 600; font-size: 18px; overflow-wrap: anywhere; }
 .rv-c { grid-area: c; font-size: 17px; color: var(--mut); }
@@ -357,7 +375,7 @@ button { font: inherit; color: inherit; }
 .adder form { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; padding: 4px 0 8px; }
 .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; width: 100%; }
 .fld { display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0; }
-.fld > span { font-size: 16px; font-weight: 600; color: var(--mut); }
+.fld > span { font-size: 17px; font-weight: 600; color: var(--mut); }
 .fld input, .fld select {
   font-size: 17px; line-height: 1.3; font-family: inherit; color: var(--ink); background: var(--surf); border: 1.5px solid var(--line); border-radius: 10px;
   min-height: 48px; padding: 0 12px; width: 100%; box-sizing: border-box; min-width: 0;
@@ -384,19 +402,21 @@ button { font: inherit; color: inherit; }
 .c-links { grid-area: links; display: flex; flex-wrap: wrap; column-gap: 18px; margin-left: -2px; }
 .c-links:empty { display: none; }
 .c-rm { grid-area: rm; align-self: start; justify-self: end; }
-.st { display: inline-block; font-size: 16px; font-weight: 600; padding: 4px 12px; border-radius: 999px; background: var(--line); color: var(--ink); white-space: nowrap; }
+.st { display: inline-block; font-size: 17px; font-weight: 600; padding: 4px 12px; border-radius: 999px; background: var(--line); color: var(--ink); white-space: nowrap; }
 .st.open { background: var(--warn-bg); color: var(--warn); }
 .st.in_progress { background: var(--soft); color: var(--acc); }
 .st.done { background: var(--acc); color: var(--acc-ink); }
 .lnk { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--acc); font-weight: 600; font-size: 17px; text-decoration: none; white-space: nowrap; }
 .lnk:hover span { text-decoration: underline; }
+.lnk.plain { color: var(--mut); }
+.lnk.plain:hover span { text-decoration: none; }
 .rm { display: grid; place-items: center; width: 44px; height: 44px; border: 0; background: none; color: var(--mut); border-radius: 50%; cursor: pointer; }
 .rm:hover { background: var(--warn-bg); color: var(--warn); }
 
 /* sites */
 .site-list { list-style: none; margin: 12px 0 0; padding: 0; border-top: 1px solid var(--line); }
 .site-row { display: flex; flex-direction: column; gap: 2px; padding: 14px 0; border-bottom: 1px solid var(--line); }
-.site-row code { font-size: 16px; color: var(--ink); }
+.site-row code { font-size: 17px; color: var(--ink); }
 
 /* token form */
 .token { max-width: 420px; margin: 48px auto 0; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
@@ -417,12 +437,12 @@ button { font: inherit; color: inherit; }
   .a-ready:not(:empty) ~ .a-pages { margin-top: 36px; }
   .a-sites { margin-top: 56px; }
 }
-@media (min-width: 1100px) {
+@media (min-width: 1200px) {
   .pages thead { display: table-header-group; }
   .pages tbody { display: table-row-group; border-top: 0; }
   .pages tr { display: table-row; }
   .pages th {
-    text-align: left; font-size: 15px; font-weight: 600; letter-spacing: .08em; text-transform: uppercase; color: var(--mut);
+    text-align: left; font-size: 17px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--mut);
     padding: 10px 12px; border-bottom: 1px solid var(--line);
   }
   .pages td { padding: 14px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
@@ -454,23 +474,34 @@ function errorText(res: { status: number; error?: string }): string {
   return `Something went wrong (status ${res.status}).`;
 }
 
-async function copyText(win: Window, text: string, el: HTMLElement): Promise<boolean> {
+/**
+ * Clipboard first. If that is refused, select the shown text (the link or command itself)
+ * and try the old copy command; "selected" means the person has to copy it themselves.
+ */
+export async function copyText(win: Window, text: string, shown: HTMLElement | null): Promise<"copied" | "selected"> {
   try {
     await win.navigator.clipboard.writeText(text);
-    return true;
+    return "copied";
   } catch {
-    // Fallback: select the text so a long-press or Cmd-C copies it.
+    /* fall through */
+  }
+  if (shown) {
     try {
       const range = win.document.createRange();
-      range.selectNodeContents(el);
+      range.selectNodeContents(shown);
       const sel = win.getSelection();
       sel?.removeAllRanges();
       sel?.addRange(range);
-      return win.document.execCommand("copy");
     } catch {
-      return false;
+      /* selection unavailable */
     }
   }
+  try {
+    if (shown && win.document.execCommand("copy")) return "copied";
+  } catch {
+    /* not supported */
+  }
+  return "selected";
 }
 
 export async function mountOwner(win: Window): Promise<void> {
@@ -616,12 +647,15 @@ export async function mountOwner(win: Window): Promise<void> {
   async function onClick(el: HTMLElement): Promise<void> {
     const copy = el.getAttribute("data-copy");
     if (copy !== null) {
-      const target = (el.parentElement?.querySelector("code") as HTMLElement | null) ?? el;
-      const ok = await copyText(win, copy, target);
+      const shown = el.closest(".flash, .cmd")?.querySelector("code") as HTMLElement | null;
+      const result = await copyText(win, copy, shown);
       const label = el.querySelector("span");
-      if (label && ok) {
+      if (!label) return;
+      if (result === "copied") {
         label.textContent = "Copied";
         setTimeout(() => (label.textContent = "Copy"), 1800);
+      } else {
+        label.textContent = el.closest(".flash") ? "Select and copy the link" : "Select and copy the command";
       }
       return;
     }
