@@ -28,7 +28,7 @@ describe("loader boot", () => {
     expect(sessionStorage.length).toBe(0);
   });
 
-  it("URL token: stored, stripped from the address bar, overlay loaded with config", async () => {
+  it("query token (fallback): stored, stripped from the address bar, overlay loaded with config", async () => {
     const { load, start } = setup("?ttf=abc&x=1#h");
     expect(boot(document, window, load)).toBe(true);
     expect(sessionStorage.getItem("ttf:token")).toBe("abc");
@@ -42,6 +42,53 @@ describe("loader boot", () => {
       token: "abc",
       dashboardUrl: "https://svc.example.com/r/#ttf=abc",
     });
+  });
+
+  it("fragment token: read from #ttf=, stripped, other hash and query parts kept", async () => {
+    const { load, start } = setup("?q=1#ttf=abc&x=1");
+    expect(boot(document, window, load)).toBe(true);
+    expect(sessionStorage.getItem("ttf:token")).toBe("abc");
+    expect(location.pathname + location.search + location.hash).toBe("/page?q=1#x=1");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(start).toHaveBeenCalledWith(expect.objectContaining({ token: "abc" }));
+  });
+
+  it("fragment token alone leaves no empty # or ?", () => {
+    const { load } = setup("#ttf=abc");
+    expect(boot(document, window, load)).toBe(true);
+    expect(location.href).toBe(location.origin + "/page");
+  });
+
+  it("a plain anchor is left exactly as it was", () => {
+    const { load } = setup("?a=b+c#section-2");
+    sessionStorage.setItem("ttf:token", "stored");
+    expect(boot(document, window, load)).toBe(true);
+    expect(location.search + location.hash).toBe("?a=b+c#section-2");
+  });
+
+  it("the fragment wins over the query, and both are stripped", () => {
+    const { load } = setup("?ttf=old#ttf=new");
+    expect(boot(document, window, load)).toBe(true);
+    expect(sessionStorage.getItem("ttf:token")).toBe("new");
+    expect(location.search + location.hash).toBe("");
+  });
+
+  for (const search of ["?ttf=", "#ttf=", "?ttf=&x=1#ttf="]) {
+    it(`empty token (${search}) counts as no token and is stripped`, () => {
+      const { load } = setup(search);
+      expect(boot(document, window, load)).toBe(false);
+      expect(load).not.toHaveBeenCalled();
+      expect(sessionStorage.length).toBe(0);
+      expect(location.search + location.hash).not.toContain("ttf");
+    });
+  }
+
+  it("empty token falls back to the one saved earlier in the visit", () => {
+    const { load } = setup("#ttf=");
+    sessionStorage.setItem("ttf:token", "stored");
+    expect(boot(document, window, load)).toBe(true);
+    expect(sessionStorage.getItem("ttf:token")).toBe("stored");
   });
 
   it("falls back to the token in sessionStorage", () => {
