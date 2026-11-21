@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { expect, test, type Page } from "@playwright/test";
 
 const SERVICE = "http://localhost:8788";
@@ -179,6 +180,22 @@ test("ready box shows the command", async ({ page }) => {
   await expect(box).toBeVisible();
   await expect(box.locator("code")).toHaveText("/tap-to-fix:fix quinn fixture");
   await expect(ownerRow(page, "Ready page")).toContainText("Open");
+});
+
+test("ready box downloads a batch file that matches the count", async ({ page }) => {
+  const r = await reviewerWith("Dana Download", [{ path: "/other.html", title: "Download page" }]);
+  await comment(r.token, "/other.html", "First");
+  await comment(r.token, "/other.html", "Second");
+  await page.goto(OWNER_URL());
+  const box = page.locator("[data-ready]", { hasText: "Dana has 2 comments ready" });
+  const btn = box.getByRole("button", { name: "Download batch file" });
+  await expect(btn).toBeVisible();
+  expect((await btn.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+  const [download] = await Promise.all([page.waitForEvent("download"), btn.click()]);
+  expect(download.suggestedFilename()).toMatch(/^tap-to-fix-fixture-dana-download-\d{8}\.json$/);
+  const file = JSON.parse(readFileSync((await download.path())!, "utf8"));
+  expect(file.comments).toHaveLength(2);
+  expect(file.reviewer.name).toBe("Dana Download");
 });
 
 test("reissue asks first and the old link stops working", async ({ page }) => {

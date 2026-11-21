@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import type { Context } from "hono";
 import { requireOwner, type AppBindings } from "../auth";
 import { hashToken, newId, newToken } from "../ids";
+import { slug } from "../../client/dash/names";
 import { assignmentStatus, isSettled, type Status } from "../rollup";
 
 const owner = new Hono<AppBindings>();
@@ -212,6 +213,15 @@ owner.get("/overview", async (c) => {
   return c.json({ reviewers, assignments });
 });
 
+/** Base64 without Node's Buffer (not in Workers): btoa over chunks of the binary string. */
+function toBase64(bytes: Uint8Array): string {
+  let out = "";
+  for (let i = 0; i < bytes.length; i += 0x8000) {
+    out += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+  }
+  return btoa(out);
+}
+
 const STATUSES: readonly Status[] = ["open", "in_progress", "done", "later", "kept"];
 
 owner.get("/batch", async (c) => {
@@ -236,7 +246,7 @@ owner.get("/batch", async (c) => {
   const { results } = await c.env.DB.prepare(
     `SELECT c.id, a.path, a.title, c.body, c.status, c.selector, c.element_text, c.element_x, c.element_y,
             c.page_x, c.page_y, c.viewport_w, c.viewport_h, c.device,
-            c.screenshot_key IS NOT NULL AS has_screenshot, c.created_at
+            c.screenshot_key, c.screenshot_key IS NOT NULL AS has_screenshot, c.created_at
        FROM comments c JOIN assignments a ON a.id = c.assignment_id
       WHERE a.reviewer_id = ? AND a.site_slug = ? AND c.status IN (${placeholders})
       ORDER BY c.created_at, c.id`,
@@ -244,7 +254,7 @@ owner.get("/batch", async (c) => {
     .bind(reviewer.id, site.slug, ...wanted)
     .all<Record<string, unknown>>();
 
-  return c.json({
+  const batch = {
     reviewer,
     site,
     comments: results.map((r) => ({
@@ -264,6 +274,28 @@ owner.get("/batch", async (c) => {
       has_screenshot: Boolean(r.has_screenshot),
       created_at: r.created_at,
     })),
+  };
+  if (c.req.query("format") !== "file") return c.json(batch);
+
+  // Offline file for `ttf batch --from`: the batch plus every screenshot as base64.
+  const screenshots: Record<string, { type: string; base64: string }> = {};
+  for (const r of results) {
+    if (typeof r.screenshot_key !== "string") continue;
+    const obj = await c.env.SHOTS.get(r.screenshot_key);
+    if (!obj) continue;
+    screenshots[String(r.id)] = {
+      type: obj.httpMetadata?.contentType ?? "image/png",
+      base64: toBase64(new Uint8Array(await obj.arrayBuffer())),
+    };
+  }
+  const safe = (v: string) => v.replace(/[^A-Za-z0-9_-]+/g, "-");
+  const filename = `tap-to-fix-${safe(site.slug)}-${slug(reviewer.name) || "reviewer"}-${new Date().toISOString().slice(0, 10).replaceAll("-", "")}.json`;
+  return new Response(JSON.stringify({ ...batch, screenshots }), {
+    headers: {
+      "Content-Type": "application/json",
+      "Content-Disposition": `attachment; filename="${filename}"`,
+      "Cache-Control": "private, no-store",
+    },
   });
 });
 

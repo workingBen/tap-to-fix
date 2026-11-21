@@ -80,13 +80,38 @@ describe("readyBatches", () => {
       ],
     };
     expect(readyBatches(overview, SITES)).toEqual([
-      { reviewerName: "Alexis Rivera", siteSlug: "greensprings", siteName: "Greensprings Longevity", open: 4, command: "/tap-to-fix:fix alexis greensprings" },
-      { reviewerName: "Alexis Rivera", siteSlug: "bonus-decade", siteName: "Bonus Decade", open: 3, command: "/tap-to-fix:fix alexis bonus-decade" },
+      { reviewerId: "r1", reviewerName: "Alexis Rivera", siteSlug: "greensprings", siteName: "Greensprings Longevity", open: 4, command: "/tap-to-fix:fix alexis greensprings" },
+      { reviewerId: "r1", reviewerName: "Alexis Rivera", siteSlug: "bonus-decade", siteName: "Bonus Decade", open: 3, command: "/tap-to-fix:fix alexis bonus-decade" },
     ]);
   });
   it("falls back to the slug when the site is unknown", () => {
     const [b] = readyBatches({ reviewers: [ALEXIS], assignments: [a({ site: "gone" }, { open: 1 })] });
     expect(b.siteName).toBe("gone");
+  });
+});
+
+describe("unambiguous fix commands", () => {
+  it("two reviewers with the same first name both get slug commands", () => {
+    const smith = { ...ALEXIS, id: "r2", name: "Alexis Smith" };
+    const overview: Overview = {
+      reviewers: [ALEXIS, smith],
+      assignments: [a({ id: "1" }, { open: 2 }), a({ id: "2", reviewer: { id: "r2", name: "Alexis Smith" } }, { open: 1 })],
+    };
+    expect(readyBatches(overview, SITES).map((b) => b.command)).toEqual([
+      "/tap-to-fix:fix alexis-rivera bonus-decade",
+      "/tap-to-fix:fix alexis-smith bonus-decade",
+    ]);
+    // A reviewer with no open comments still counts toward the clash.
+    const quiet = { ...overview, assignments: [a({ id: "1" }, { open: 2 })] };
+    expect(readyBatches(quiet, SITES)[0].command).toBe("/tap-to-fix:fix alexis-rivera bonus-decade");
+  });
+  it("each ready box has a 44px-class download button carrying reviewer and site", () => {
+    const box = document.createElement("div");
+    box.innerHTML = renderOwner(state({ overview: { reviewers: [ALEXIS], assignments: [a({}, { open: 1 })] } }));
+    const btn = box.querySelector("[data-ready] [data-action=download-batch]")!;
+    expect(btn.getAttribute("data-id")).toBe("r1");
+    expect(btn.getAttribute("data-site")).toBe("bonus-decade");
+    expect(btn.textContent).toContain("Download batch file");
   });
 });
 
@@ -234,6 +259,40 @@ describe("mountOwner", () => {
     await vi.waitFor(() => expect(button.textContent).toBe("Select and copy the link"));
     expect(window.getSelection()!.toString()).toBe(link);
     expect(window.getSelection()!.toString()).not.toBe("Copy");
+  });
+  it("Download batch file fetches with the Bearer token (never in the URL) and saves a Blob", async () => {
+    history.replaceState(null, "", "/o/#owner=tok");
+    const calls: { path: string; auth: string | null }[] = [];
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string, init?: RequestInit) => {
+        calls.push({ path, auth: new Headers(init?.headers).get("Authorization") });
+        if (path.endsWith("/sites")) return new Response(JSON.stringify(SITES), { status: 200 });
+        if (path.includes("/api/owner/batch")) {
+          return new Response('{"comments":[]}', {
+            status: 200,
+            headers: { "Content-Disposition": 'attachment; filename="tap-to-fix-bonus-decade-alexis-rivera-20261120.json"' },
+          });
+        }
+        return new Response(JSON.stringify({ reviewers: [ALEXIS], assignments: [a({}, { open: 1 })] }), { status: 200 });
+      }),
+    );
+    const created = vi.fn(() => "blob:x");
+    Object.defineProperty(URL, "createObjectURL", { configurable: true, value: created });
+    Object.defineProperty(URL, "revokeObjectURL", { configurable: true, value: () => {} });
+    const names: string[] = [];
+    const click = vi.spyOn(HTMLAnchorElement.prototype, "click").mockImplementation(function (this: HTMLAnchorElement) {
+      names.push(this.download);
+    });
+    await mountOwner(window);
+    (document.querySelector("[data-action=download-batch]") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(names).toEqual(["tap-to-fix-bonus-decade-alexis-rivera-20261120.json"]));
+    const call = calls.find((c) => c.path.includes("/api/owner/batch"))!;
+    expect(call.path).toBe("/api/owner/batch?reviewer=r1&site=bonus-decade&format=file");
+    expect(call.path).not.toContain("tok");
+    expect(call.auth).toBe("Bearer tok");
+    expect(created).toHaveBeenCalled();
+    click.mockRestore();
   });
   it("takes the token out of the address bar once stored", async () => {
     history.replaceState(null, "", "/o/#owner=tok");

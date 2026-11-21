@@ -2,6 +2,7 @@
 // assignments with status and PR links, and the command that starts a review cycle.
 // Pure view functions (state in, HTML out) plus a thin mount layer that talks to the API.
 import { api, escapeHtml, type ApiResult } from "./common";
+import { commandName } from "./names";
 import { DASH_CSS } from "./dash.css";
 
 export type Site = { slug: string; name: string; origin: string; repo: string; created_at?: string };
@@ -25,7 +26,7 @@ export type OwnerState = {
   selectedReviewerId: string | null;
   flash: Flash | null;
 };
-export type ReadyBatch = { reviewerName: string; siteSlug: string; siteName: string; open: number; command: string };
+export type ReadyBatch = { reviewerId: string; reviewerName: string; siteSlug: string; siteName: string; open: number; command: string };
 
 export const STORAGE_KEY = "ttf:owner-token";
 
@@ -35,9 +36,13 @@ const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? "";
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 const esc = escapeHtml;
 
-/** The Claude Code command that starts a review cycle for one reviewer on one site. */
-export function fixCommand(reviewerName: string, siteSlug: string): string {
-  return `/tap-to-fix:fix ${firstName(reviewerName).toLowerCase()} ${siteSlug}`;
+/**
+ * The Claude Code command that starts a review cycle for one reviewer on one site. The name is the
+ * first name when it is unique among all reviewers, else the full-name slug (the CLI refuses an
+ * ambiguous first name). Pass every reviewer so a shared first name is noticed.
+ */
+export function fixCommand(reviewerName: string, siteSlug: string, reviewers: { name: string }[] = [{ name: reviewerName }]): string {
+  return `/tap-to-fix:fix ${commandName(reviewers, { name: reviewerName })} ${siteSlug}`;
 }
 
 export function reviewerLink(origin: string, token: string): string {
@@ -67,11 +72,12 @@ export function readyBatches(overview: Overview, sites: Site[] = []): ReadyBatch
     if (a.counts.open <= 0) continue;
     const key = a.reviewer.id + "\u0000" + a.site;
     const b = byKey.get(key) ?? {
+      reviewerId: a.reviewer.id,
       reviewerName: a.reviewer.name,
       siteSlug: a.site,
       siteName: siteName.get(a.site) ?? a.site,
       open: 0,
-      command: fixCommand(a.reviewer.name, a.site),
+      command: fixCommand(a.reviewer.name, a.site, overview.reviewers),
     };
     b.open += a.counts.open;
     byKey.set(key, b);
@@ -110,6 +116,7 @@ const svg = (d: string, size = 20) =>
 const PLUS = svg('<path d="M12 5v14M5 12h14"/>');
 const CLOSE = svg('<path d="M6 6l12 12M18 6L6 18"/>');
 const COPY = svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>', 18);
+const DOWNLOAD = svg('<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>', 18);
 const OUT = svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>', 17);
 const PR = svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4M13 3.5L10.5 6 13 8.5"/>', 17);
 
@@ -141,6 +148,8 @@ function readyHtml(batches: ReadyBatch[]): string {
             .split(" ")
             .map((t) => `<span class="tok">${esc(t)}</span>`)
             .join(" ")}</code>${copyButton(b.command)}</div>` +
+          `<div class="dl"><button type="button" class="btn quiet" data-action="download-batch" data-id="${esc(b.reviewerId)}" data-site="${esc(b.siteSlug)}">${DOWNLOAD}<span>Download batch file</span></button>` +
+          `<span class="dl-s">For when the network is blocked: ttf batch --from reads it.</span>${errLine()}</div>` +
           `</div>`,
       )
       .join("") +
@@ -340,6 +349,9 @@ button { font: inherit; color: inherit; }
   padding: 10px 12px; overflow-wrap: break-word; min-width: 0; user-select: all;
 }
 .cmd code { flex: 1 1 auto; overflow-wrap: normal; overflow-x: auto; }
+.dl { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; margin-left: -12px; }
+.dl-s { font-size: 17px; color: var(--mut); }
+.dl .err { flex-basis: 100%; margin-left: 12px; }
 .cmd .tok { white-space: nowrap; hyphens: none; }
 
 /* reviewers */
@@ -457,6 +469,8 @@ button { font: inherit; color: inherit; }
   .c-links .lnk + .lnk { margin-left: 16px; }
   .ready { flex-direction: row; align-items: center; justify-content: space-between; gap: 20px; }
   .cmd { flex: none; }
+  .ready { flex-wrap: wrap; }
+  .dl { flex-basis: 100%; }
 }
 `;
 
@@ -662,7 +676,9 @@ export async function mountOwner(win: Window): Promise<void> {
     const action = el.getAttribute("data-action");
     const id = el.getAttribute("data-id") ?? "";
     const reviewer = state.overview.reviewers.find((r) => r.id === id);
-    if (action === "retry") {
+    if (action === "download-batch") {
+      await downloadBatch(el, id, el.getAttribute("data-site") ?? "");
+    } else if (action === "retry") {
       main.innerHTML = '<p class="notice muted">Loading…</p>';
       await refresh();
     } else if (action === "select") {
@@ -691,6 +707,40 @@ export async function mountOwner(win: Window): Promise<void> {
       const res = await api(tok, `/api/owner/assignments/${encodeURIComponent(id)}`, { method: "DELETE" });
       if (!res.ok) return failNear(el, res);
       await refresh();
+    }
+  }
+
+  /** Bearer fetch of the offline batch file, then a Blob download; the token never goes in a URL. */
+  async function downloadBatch(el: HTMLElement, reviewerId: string, site: string): Promise<void> {
+    const err = el.closest(".dl")?.querySelector("[data-error]") as HTMLElement | null;
+    const fail = (text: string) => {
+      if (!err) return;
+      err.textContent = text;
+      err.hidden = false;
+    };
+    if (err) err.hidden = true;
+    const label = el.querySelector("span");
+    if (label) label.textContent = "Preparing…";
+    try {
+      const res = await fetch(`/api/owner/batch?reviewer=${encodeURIComponent(reviewerId)}&site=${encodeURIComponent(site)}&format=file`, {
+        headers: { Authorization: "Bearer " + tok },
+      });
+      if (res.status === 401 || res.status === 403) return forgetToken();
+      if (!res.ok) return fail(`Something went wrong (status ${res.status}).`);
+      const blob = await res.blob();
+      const name = /filename="([^"]+)"/.exec(res.headers.get("Content-Disposition") ?? "")?.[1] ?? "tap-to-fix-batch.json";
+      const url = URL.createObjectURL(blob);
+      const a = win.document.createElement("a");
+      a.href = url;
+      a.download = name;
+      win.document.body.appendChild(a);
+      a.click();
+      a.remove();
+      setTimeout(() => URL.revokeObjectURL(url), 10_000);
+    } catch {
+      fail(MSG_OFFLINE);
+    } finally {
+      if (label) label.textContent = "Download batch file";
     }
   }
 

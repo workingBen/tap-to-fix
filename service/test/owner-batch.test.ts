@@ -1,4 +1,9 @@
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, expect, it } from "vitest";
+// @ts-expect-error plain .mjs, not type-checked
+import { readBatchFile, writeBatch } from "../../bin/lib/batch.mjs";
 import { makeEnv } from "./env";
 import { ownerFetch, reviewerFetch, seedReviewer, seedSite } from "./helpers";
 
@@ -28,6 +33,49 @@ async function setup() {
   }
   return { env, a, b, comment };
 }
+
+describe("owner batch file download", () => {
+  it("format=file adds base64 screenshots, an attachment filename, and is accepted by ttf batch --from", async () => {
+    const { env, a, comment } = await setup();
+    const c1 = await comment(a.token, "with shot", true);
+    const c2 = await comment(a.token, "no shot");
+    const res = await ownerFetch(env, `/api/owner/batch?reviewer=${a.id}&site=greensprings&format=file`);
+    expect(res.status).toBe(200);
+    const stamp = new Date().toISOString().slice(0, 10).replaceAll("-", "");
+    expect(res.headers.get("Content-Disposition")).toBe(`attachment; filename="tap-to-fix-greensprings-chris-${stamp}.json"`);
+    const text = await res.text();
+    const body = JSON.parse(text);
+    expect(body.comments.map((c: any) => c.id)).toEqual([c1, c2]); // eslint-disable-line @typescript-eslint/no-explicit-any
+    expect(Object.keys(body.screenshots)).toEqual([c1]);
+    expect(body.screenshots[c1].type).toBe("image/png");
+    expect(Buffer.from(body.screenshots[c1].base64, "base64")).toEqual(Buffer.from(png));
+    expect(text).not.toContain("screenshot_key");
+    expect(text).not.toContain("ttf");
+
+    // Round trip: the file the server produced is what `ttf batch --from` reads.
+    const dir = mkdtempSync(join(tmpdir(), "ttf-rt-"));
+    const file = join(dir, "batch-file.json");
+    writeFileSync(file, text);
+    const { batch, shots } = readBatchFile(file);
+    expect(batch.comments).toHaveLength(2);
+    const out = writeBatch(join(dir, "out"), batch, shots);
+    expect(out.comments[0].screenshot_path).toBe(`shots/${c1}.png`);
+    expect(out.comments[1].screenshot).toBe("missing");
+    expect(readFileSync(join(dir, "out", out.comments[0].screenshot_path))).toEqual(Buffer.from(png));
+    rmSync(dir, { recursive: true });
+  });
+
+  it("encodes a screenshot larger than one chunk correctly", async () => {
+    const { env, a, comment } = await setup();
+    const id = await comment(a.token, "big", true);
+    const big = new Uint8Array(100_000).map((_, i) => i % 256);
+    const key = (await env.DB.prepare("SELECT screenshot_key k FROM comments WHERE id = ?").bind(id).first<{ k: string }>())!.k;
+    await env.SHOTS.put(key, big, { httpMetadata: { contentType: "image/webp" } });
+    const body = await json(await ownerFetch(env, `/api/owner/batch?reviewer=${a.id}&site=greensprings&format=file`));
+    expect(Buffer.from(body.screenshots[id].base64, "base64")).toEqual(Buffer.from(big));
+    expect(body.screenshots[id].type).toBe("image/webp");
+  });
+});
 
 describe("owner batch and status API", () => {
   it("batch returns only that reviewer's open comments, oldest first, with a tokenless url", async () => {
