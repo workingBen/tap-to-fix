@@ -134,6 +134,25 @@ describe("ttf batch", () => {
     expect(new Uint8Array(readFileSync(join(dir, "shots", `${w.c2}.png`)))).toEqual(PNG);
   });
 
+  it("--from a file with omitted screenshots marks them missing and says how many were left out", async () => {
+    const w = await world();
+    const file = join(w.cwd, "capped.json");
+    const raw = (await (
+      await app.fetch(
+        new Request(`http://svc/api/owner/batch?reviewer=${w.reviewer.id}&site=greensprings`, { headers: { Authorization: "Bearer " + w.env.OWNER_TOKEN } }),
+        w.env,
+      )
+    ).json()) as { comments: Record<string, unknown>[] };
+    const comments = raw.comments.map((c) => ({ ...c, screenshot_omitted: "file size limit" }));
+    writeFileSync(file, JSON.stringify({ ...raw, comments, screenshots_omitted: 2, screenshots: {} }));
+    const dir = join(w.cwd, "capped");
+    w.out.length = 0;
+    expect(await main(["batch", "--from", file, "--out", dir], w.ctx)).toBe(0);
+    const written = JSON.parse(readFileSync(join(dir, "batch.json"), "utf8"));
+    expect(written.comments.every((c: { screenshot: string }) => c.screenshot === "missing")).toBe(true);
+    expect(w.out.some((l: string) => /^2 screenshots were left out of the file .*ttf batch once you are online/.test(l))).toBe(true);
+  });
+
   it("exits 2 for an unknown reviewer and 1 without enough arguments", async () => {
     const w = await world();
     expect(await main(["batch", "nobody", "greensprings"], w.ctx)).toBe(2);

@@ -1,9 +1,11 @@
 import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 // @ts-expect-error plain .mjs, not type-checked
 import { readBatchFile, writeBatch } from "../../bin/lib/batch.mjs";
+import { BATCH_FILE_MAX_BYTES, BATCH_FILE_MAX_SHOTS, batchFileLimits } from "../src/limits";
+import { toBase64 } from "../src/routes/owner";
 import { makeEnv } from "./env";
 import { ownerFetch, reviewerFetch, seedReviewer, seedSite } from "./helpers";
 
@@ -74,6 +76,60 @@ describe("owner batch file download", () => {
     const body = await json(await ownerFetch(env, `/api/owner/batch?reviewer=${a.id}&site=greensprings&format=file`));
     expect(Buffer.from(body.screenshots[id].base64, "base64")).toEqual(Buffer.from(big));
     expect(body.screenshots[id].type).toBe("image/webp");
+  });
+});
+
+describe("owner batch file caps", () => {
+  async function seedShots(n: number, size: number) {
+    const { env, a, comment } = await setup();
+    const ids: string[] = [];
+    for (let i = 0; i < n; i++) {
+      const id = await comment(a.token, `c${i}`, true);
+      const key = (await env.DB.prepare("SELECT screenshot_key k FROM comments WHERE id = ?").bind(id).first<{ k: string }>())!.k;
+      await env.SHOTS.put(key, new Uint8Array(size).fill(7), { httpMetadata: { contentType: "image/png" } });
+      ids.push(id);
+      await new Promise((r) => setTimeout(r, 2));
+    }
+    return { env, a, ids };
+  }
+  const fetchFile = async (env: any, a: any) => json(await ownerFetch(env, `/api/owner/batch?reviewer=${a.id}&site=greensprings&format=file`)); // eslint-disable-line @typescript-eslint/no-explicit-any
+  const restore = { ...batchFileLimits };
+  afterEach(() => Object.assign(batchFileLimits, restore));
+
+  it("has the 40-shot / 40 MB defaults", () => {
+    expect(BATCH_FILE_MAX_SHOTS).toBe(40);
+    expect(BATCH_FILE_MAX_BYTES).toBe(40 * 1024 * 1024);
+  });
+
+  it("caps by count: every comment stays, the rest are marked omitted", async () => {
+    batchFileLimits.maxShots = 2;
+    const { env, a, ids } = await seedShots(4, 10);
+    const body = await fetchFile(env, a);
+    expect(body.comments).toHaveLength(4);
+    expect(Object.keys(body.screenshots)).toEqual(ids.slice(0, 2));
+    expect(body.screenshots_omitted).toBe(2);
+    expect(body.comments.map((c: any) => c.screenshot_omitted)).toEqual([undefined, undefined, "file size limit", "file size limit"]); // eslint-disable-line @typescript-eslint/no-explicit-any
+  });
+
+  it("caps by bytes", async () => {
+    batchFileLimits.maxBytes = 25;
+    const { env, a, ids } = await seedShots(4, 10);
+    const body = await fetchFile(env, a);
+    expect(body.comments).toHaveLength(4);
+    expect(Object.keys(body.screenshots)).toEqual(ids.slice(0, 2));
+    expect(body.screenshots_omitted).toBe(2);
+  });
+
+  it("no omitted marker when everything fits", async () => {
+    const { env, a } = await seedShots(2, 10);
+    const body = await fetchFile(env, a);
+    expect(body.screenshots_omitted).toBeUndefined();
+    expect(JSON.stringify(body)).not.toContain("screenshot_omitted");
+  });
+
+  it("toBase64 round-trips 1 MB without overflowing the stack", () => {
+    const big = new Uint8Array(1_048_576).map((_, i) => (i * 31) % 256);
+    expect(Buffer.from(toBase64(big), "base64").equals(Buffer.from(big))).toBe(true);
   });
 });
 

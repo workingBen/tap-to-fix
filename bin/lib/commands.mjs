@@ -84,6 +84,10 @@ export const commands = {
       const missing = written.comments.filter((c) => c.screenshot === "missing" && c.has_screenshot).length;
       ctx.out(dir);
       ctx.out(`${written.comments.length} item${written.comments.length === 1 ? "" : "s"}` + (missing ? ` (${missing} screenshot${missing === 1 ? "" : "s"} missing)` : ""));
+      const left = Number(batch.screenshots_omitted) || 0;
+      if (flags.from && left) {
+        ctx.out(`${left} screenshot${left === 1 ? " was" : "s were"} left out of the file (size limit); fetch ${left === 1 ? "it" : "them"} later with ttf batch once you are online.`);
+      }
       return EXIT.ok;
     },
   },
