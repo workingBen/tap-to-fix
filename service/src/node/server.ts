@@ -52,6 +52,12 @@ const env: Env = { DB: db, SHOTS: createR2(), OWNER_TOKEN: token };
 const port = Number(process.env.PORT ?? 8787);
 // Static client files (public/t.js, public/overlay.js) first, then the API app.
 const outer = new Hono();
+outer.use("*", async (c, next) => {
+  await next();
+  c.header("Referrer-Policy", "no-referrer");
+});
+outer.get("/r", (c) => c.redirect("/r/"));
+outer.get("/o", (c) => c.redirect("/o/"));
 outer.use("/*.js", async (c, next) => {
   await next();
   c.header("Access-Control-Allow-Origin", "*");

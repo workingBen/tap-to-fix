@@ -5,6 +5,11 @@ import owner from "./routes/owner";
 
 const app = new Hono<{ Bindings: Env }>();
 
+app.use("*", async (c, next) => {
+  await next();
+  c.header("Referrer-Policy", "no-referrer");
+});
+
 app.get("/api/health", (c) => c.json({ ok: true }));
 
 app.route("/api/owner", owner);
