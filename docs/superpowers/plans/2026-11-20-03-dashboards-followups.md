@@ -24,3 +24,9 @@ Written at the end of plan 3 (2026-11-20). Sources: the SDD ledger and the task 
 ## Small known gaps
 - `data-len` on the progress arc is unused output.
 - `e2e/shots-*.ts` need ports 8788/4173/4174 free and write PNGs to the folder you pass.
+
+## From the final review (2026-11-20)
+- **Two reviewers with the same first name get the same fix command** (`owner.ts` `fixCommand`), so plan 4's first-word match could pull the wrong reviewer's comments. Plan 4 must pick one: refuse an ambiguous name and list the matches; reject a duplicate first name when a reviewer is added; or fall back to the full name or id.
+- **The spec's downloadable batch file** (owner dashboard, for blocked networks, spec line 70) is not built yet; it belongs with plan 4's fallback, and its button lives in `owner.ts`.
+- Reviewer page ignores `hashchange`: opening a reissued link in a tab that already shows the old one still says "This link no longer works" until a reload. Fix: reload on `hashchange`.
+- The paste-token form sends the owner token through the address bar, so it lands in browser history and autocomplete; store it directly instead.
