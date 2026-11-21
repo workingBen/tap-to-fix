@@ -79,7 +79,7 @@ me.get("/", async (c) => {
         site: { slug: a.site_slug, name: a.site_name, origin: a.site_origin },
         path: a.path,
         title: a.title,
-        url: a.site_origin + a.path + "?ttf=" + reviewer.token,
+        url: a.site_origin + a.path + "#ttf=" + reviewer.token,
         status: assignmentStatus(statuses),
         progress: progress(statuses),
         counts: {

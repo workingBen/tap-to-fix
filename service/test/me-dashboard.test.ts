@@ -50,7 +50,7 @@ describe("GET /api/me", () => {
     expect(asg.site).toEqual({ slug: "greensprings", name: "Greensprings", origin: "https://greensprings.life" });
     expect(asg.path).toBe("/one");
     expect(asg.title).toBe("One");
-    expect(asg.url).toBe("https://greensprings.life/one?ttf=" + a.token);
+    expect(asg.url).toBe("https://greensprings.life/one#ttf=" + a.token);
     expect(asg.status).toBe("open");
     expect(asg.progress).toBe(0.5);
     expect(asg.counts).toEqual({ total: 4, settled: 2, in_progress: 1, open: 1 });
@@ -60,7 +60,7 @@ describe("GET /api/me", () => {
     const { env, a } = await setup();
     await assign(env, a.id, "/one");
     const res = await (await import("./env")).call("/api/me?ttf=" + a.token, {}, env);
-    expect((await json(res)).assignments[0].url).toBe("https://greensprings.life/one?ttf=" + a.token);
+    expect((await json(res)).assignments[0].url).toBe("https://greensprings.life/one#ttf=" + a.token);
   });
 
   it("flags is_new until opened, and is_updated after a later status change", async () => {

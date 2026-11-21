@@ -1,0 +1,4 @@
+/* Deliberately hostile host-page CSS: the overlay must not shrink or turn red. */
+* { font-size: 9px !important; color: red !important; }
+body { position: relative; margin: 37px 0 0 23px; }
+button, a, textarea, h2 { font-family: "Comic Sans MS", cursive !important; }

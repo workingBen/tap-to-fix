@@ -15,3 +15,7 @@ bucket_name = "tap-to-fix-shots"
 
 # OWNER_TOKEN: local dev reads it from the git-ignored .dev.vars;
 # tests set it in test/env.ts; prod uses `wrangler secret put`.
+
+# Built client (t.js, overlay.js) is served from here; run `npm run build:client` first.
+[assets]
+directory = "./public"

@@ -2,3 +2,6 @@ node_modules
 .wrangler
 .dev.vars
 .local/
+
+service/public/*
+!service/public/.gitkeep
