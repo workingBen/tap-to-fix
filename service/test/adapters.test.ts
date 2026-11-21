@@ -35,6 +35,31 @@ describe("d1-sqlite", () => {
     expect(row?.n).toBe(0);
   });
 
+  it("runs concurrent batches without interleaving", async () => {
+    const db = await setup();
+    const ins = (n: string) => db.prepare("INSERT INTO t (name) VALUES (?)").bind(n);
+    const bad = db.prepare("INSERT INTO t (name) VALUES (?)").bind(null);
+    const results = await Promise.allSettled([db.batch([ins("a"), ins("b")]), db.batch([ins("c"), bad]), db.batch([ins("d")])]);
+    expect(results.map((r) => r.status)).toEqual(["fulfilled", "rejected", "fulfilled"]);
+    const all = await db.prepare("SELECT name FROM t ORDER BY name").all<{ name: string }>();
+    expect(all.results.map((r) => r.name)).toEqual(["a", "b", "d"]);
+  });
+
+  it("returns rows for SELECTs inside a batch", async () => {
+    const db = await setup();
+    const out = await db.batch([
+      db.prepare("INSERT INTO t (name) VALUES (?)").bind("x"),
+      db.prepare("SELECT name FROM t"),
+    ]);
+    expect(out[0].meta.changes).toBe(1);
+    expect(out[1].results).toEqual([{ name: "x" }]);
+  });
+
+  it("throws when binding undefined", async () => {
+    const db = await setup();
+    expect(() => db.prepare("SELECT ?").bind("ok", undefined)).toThrow(/parameter index 1/);
+  });
+
   it("enforces foreign keys", async () => {
     const db = createD1();
     await db.exec("CREATE TABLE p (id INTEGER PRIMARY KEY); CREATE TABLE c (pid INTEGER REFERENCES p(id))");

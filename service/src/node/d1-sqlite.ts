@@ -11,7 +11,25 @@ class Statement {
   ) {}
 
   bind(...values: unknown[]) {
-    return new Statement(this.db, this.sql, values.map((v) => (v === undefined ? null : v)) as SqlValue[]);
+    values.forEach((v, i) => {
+      if (v === undefined) throw new Error(`D1_TYPE_ERROR: Type 'undefined' not supported for value 'undefined' (parameter index ${i})`);
+    });
+    return new Statement(this.db, this.sql, values as SqlValue[]);
+  }
+
+  // Synchronous core, so batch() can run statements without yielding.
+  execSync() {
+    const stmt = this.db.prepare(this.sql);
+    if (stmt.columns().length > 0) {
+      const results = stmt.all(...this.values).map((r) => ({ ...r }));
+      return { results, success: true as const, meta: { changes: 0, last_row_id: 0 } };
+    }
+    const r = stmt.run(...this.values);
+    return {
+      success: true as const,
+      results: [],
+      meta: { changes: Number(r.changes), last_row_id: Number(r.lastInsertRowid) },
+    };
   }
 
   async first<T = unknown>(column?: string): Promise<T | null> {
@@ -53,8 +71,7 @@ export function createD1(path = ":memory:"): D1Database {
     async batch(statements: Statement[]) {
       db.exec("BEGIN");
       try {
-        const out = [];
-        for (const s of statements) out.push(await s.run());
+        const out = statements.map((s) => s.execSync());
         db.exec("COMMIT");
         return out;
       } catch (e) {
