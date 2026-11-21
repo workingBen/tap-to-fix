@@ -1,5 +1,6 @@
 import type { Status } from "./api";
 import { OVERLAY_CSS } from "./styles";
+import { PIN_BODY_CX, PIN_BODY_CY, PIN_FLIP_MARGIN, pinPath, type Dir } from "./pin-shape";
 
 export const STATUS_LABELS: Record<Status, string> = {
   open: "Open",
@@ -148,14 +149,25 @@ export class OverlayUI {
     const ox = r.left + win.scrollX;
     const oy = r.top + win.scrollY;
     const nodes = this.pins.map((p) => {
-      const cls = ["pin", p.settled ? "settled" : "", p.moved ? "moved" : "", p.draft ? "new" : ""].filter(Boolean);
+      const flip = p.x - win.scrollX + PIN_FLIP_MARGIN > win.innerWidth;
+      const dir: Dir = flip ? -1 : 1;
+      const cls = ["pin", flip ? "flip" : "", p.settled ? "settled" : "", p.moved ? "moved" : "", p.draft ? "new" : ""].filter(Boolean);
       const b = el(
         "button",
         { type: "button", class: cls.join(" "), "data-ttf": "pin", "aria-label": `Comment ${p.n}` },
         el("span", { class: "dot" }, String(p.n)),
       );
-      b.style.left = `${p.x - ox - 22}px`;
-      b.style.top = `${p.y - oy - 22}px`;
+      // The hit area surrounds the body; the tail's point (the svg origin, 12/49 px in) is the tap spot.
+      const body = pinPath(dir);
+      const id = flip ? "ttf-cut-l" : "ttf-cut-r";
+      b.insertAdjacentHTML(
+        "afterbegin",
+        `<svg class="pt" aria-hidden="true" focusable="false"><defs><clipPath id="${id}"><path clip-rule="evenodd" d="M-80-90H80V30H-80Z${body}"/></clipPath></defs>` +
+          `<path class="ring" clip-path="url(#${id})" d="${body}"/><path class="body" d="${body}"/>` +
+          `<circle class="mv" cx="${dir * PIN_BODY_CX}" cy="${PIN_BODY_CY}" r="19"/></svg>`,
+      );
+      b.style.left = `${p.x - ox - (flip ? 32 : 12)}px`;
+      b.style.top = `${p.y - oy - 49}px`;
       if (p.draft) b.tabIndex = -1;
       else b.addEventListener("click", () => this.onPinTap(p.n));
       return b;
