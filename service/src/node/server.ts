@@ -13,6 +13,8 @@ import { createR2 } from "./r2-memory";
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
 function ownerToken(): string {
+  // An explicit environment variable wins (the e2e harness relies on this), then .dev.vars.
+  if (process.env.OWNER_TOKEN) return process.env.OWNER_TOKEN;
   const varsFile = join(root, ".dev.vars");
   if (existsSync(varsFile)) {
     for (const line of readFileSync(varsFile, "utf8").split("\n")) {
@@ -20,7 +22,7 @@ function ownerToken(): string {
       if (m) return m[1].replace(/^(["'])(.*)\1$/, "$2");
     }
   }
-  return process.env.OWNER_TOKEN ?? "";
+  return "";
 }
 
 const token = ownerToken();
@@ -29,8 +31,10 @@ if (!token) {
   process.exit(1);
 }
 
-mkdirSync(join(root, ".local"), { recursive: true });
-const db = createD1(join(root, ".local", "dev.sqlite"));
+// TTF_DB_PATH lets the e2e harness use a throwaway database; the default is unchanged.
+const dbPath = process.env.TTF_DB_PATH || join(root, ".local", "dev.sqlite");
+mkdirSync(dirname(dbPath), { recursive: true });
+const db = createD1(dbPath);
 
 await db.exec("CREATE TABLE IF NOT EXISTS _migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)");
 const applied = new Set(

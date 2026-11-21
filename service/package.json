@@ -5,8 +5,9 @@
     "test": "vitest run",
     "dev": "wrangler dev",
     "dev:node": "npm run build:client && tsx src/node/server.ts",
-    "typecheck": "tsc --noEmit && tsc --noEmit -p client",
-    "build:client": "node scripts/build-client.mjs"
+    "typecheck": "tsc --noEmit && tsc --noEmit -p client && tsc --noEmit -p e2e",
+    "build:client": "node scripts/build-client.mjs",
+    "e2e": "npm run build:client && playwright test -c e2e"
   },
   "dependencies": {
     "@hono/node-server": "^2.1.11",
@@ -14,6 +15,7 @@
   },
   "devDependencies": {
     "@cloudflare/workers-types": "^5.20261120.1",
+    "@playwright/test": "1.61.1",
     "@types/node": "^22.20.5",
     "esbuild": "^0.28.2",
     "happy-dom": "^21.0.4",
