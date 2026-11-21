@@ -6,7 +6,10 @@ const PLACEHOLDER =
   "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mO8d+/ePQAGsAK/Bc1m1QAAAABJRU5ErkJggg==";
 
 // Crops by capturing only a viewport-sized window: width/height = viewport and the
-// cloned root is shifted by the scroll offset, so we never render the whole page.
+// cloned root is shifted by the scroll offset, so only the viewport is painted. (The
+// library still clones the whole document and fetches its images to inline them.)
+// Scale follows the screen's pixel density, so a 390 px phone at 3x gives ~1170 px,
+// capped so the image is never wider than 1200 px.
 async function captureViewport(exclude: Element): Promise<HTMLCanvasElement> {
   return domToCanvas(document.documentElement, {
     width: window.innerWidth,
@@ -15,7 +18,7 @@ async function captureViewport(exclude: Element): Promise<HTMLCanvasElement> {
     filter: (n) => n !== exclude,
     fetch: { placeholderImage: PLACEHOLDER },
     timeout: 8000,
-    scale: 1,
+    scale: Math.min(window.devicePixelRatio || 1, 1200 / window.innerWidth),
   });
 }
 

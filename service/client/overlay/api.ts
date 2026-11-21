@@ -47,7 +47,7 @@ export async function postComment(
   cfg: OverlayConfig,
   data: object,
   shot: Blob | null,
-): Promise<{ ok: true; id: string } | { ok: false }> {
+): Promise<{ ok: true; id: string } | { ok: false; status?: number }> {
   // A plain timer (not AbortSignal.timeout) so the abort follows the page clock.
   const abort = new AbortController();
   const timer = setTimeout(() => abort.abort(), SAVE_TIMEOUT_MS);
@@ -62,7 +62,7 @@ export async function postComment(
       credentials: "omit",
       signal: abort.signal,
     });
-    if (!res.ok) return { ok: false };
+    if (!res.ok) return { ok: false, status: res.status };
     const json = (await res.json()) as { id?: unknown };
     return typeof json.id === "string" ? { ok: true, id: json.id } : { ok: false };
   } catch {

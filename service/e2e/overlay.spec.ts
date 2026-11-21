@@ -1,6 +1,8 @@
 import { expect, test, type Page } from "@playwright/test";
 
 const SERVICE = "http://localhost:8788";
+/** The overlay's wait for the screenshot before it saves without one (index.ts SHOT_WAIT_MS). */
+const SHOT_WAIT_MS = 12_000;
 const token = () => process.env.TTF_TOKEN ?? "";
 const ownerHeaders = () => ({ Authorization: `Bearer ${process.env.TTF_OWNER_TOKEN}`, "Content-Type": "application/json" });
 
@@ -17,8 +19,11 @@ const bar = (page: Page) => overlay(page).locator("[data-ttf=bar]");
 const pins = (page: Page) => overlay(page).locator("[data-ttf=pin]");
 const sheet = (page: Page) => overlay(page).locator("[data-ttf=sheet]");
 
+/** Opens a page the way a reviewer's link does: the token rides in the fragment. */
 async function openAsReviewer(page: Page, path = "/index.html", t = token()): Promise<void> {
-  await page.goto(`${path}?ttf=${encodeURIComponent(t)}`);
+  // A fragment-only change is a same-document navigation; start from blank so it really loads.
+  if (page.url() !== "about:blank") await page.goto("about:blank");
+  await page.goto(`${path}#ttf=${encodeURIComponent(t)}`);
 }
 
 async function openReady(page: Page): Promise<void> {
@@ -46,6 +51,22 @@ test("reviewer link strips the token and shows the bar", async ({ page }) => {
   expect(page.url()).not.toContain("ttf");
   expect(new URL(page.url()).pathname).toBe("/index.html");
   await expect(overlay(page).getByRole("link", { name: "Done" })).toHaveAttribute("href", /\/r\/#ttf=/);
+});
+
+test("the older ?ttf= link still works and is stripped too", async ({ page }) => {
+  await page.goto(`/index.html?keep=1&ttf=${encodeURIComponent(token())}#top`);
+  await expect(bar(page)).toContainText("Reviewing");
+  const url = new URL(page.url());
+  expect(page.url()).not.toContain("ttf");
+  expect(url.search + url.hash).toBe("?keep=1#top");
+});
+
+test("an empty ttf= counts as no token", async ({ page }) => {
+  await page.goto("/index.html#ttf=");
+  await page.waitForLoadState("load");
+  await page.waitForTimeout(500);
+  await expect(overlay(page)).toHaveCount(0);
+  expect(page.url()).not.toContain("ttf");
 });
 
 test("tapping a link drops a pin instead of navigating", async ({ page }) => {
@@ -103,6 +124,41 @@ test("the pin lands where the reviewer tapped", async ({ page }) => {
   expect(Math.abs(pin.x + pin.width / 2 - at.x)).toBeLessThan(3);
   expect(Math.abs(pin.y + pin.height / 2 - at.y)).toBeLessThan(3);
   expect(pin.width).toBeGreaterThanOrEqual(44);
+});
+
+test("a page touchend preventDefault still lets a tap drop a pin", async ({ page }) => {
+  await openReady(page);
+  await page.evaluate(() => {
+    // Runs before the overlay's document listeners, and suppresses the tap's click.
+    window.addEventListener("touchend", (e) => e.preventDefault(), { capture: true, passive: false });
+    // The page's own handlers must not see a review tap.
+    const h1 = document.querySelector("h1")!;
+    for (const type of ["pointerdown", "pointerup", "touchstart", "touchend", "mousedown", "mouseup", "click"]) {
+      h1.addEventListener(type, () => (document.body.dataset["saw" + type] = "1"));
+    }
+  });
+  await page.locator("h1").tap();
+  await expect(pins(page)).toHaveCount(1);
+  await expect(sheet(page)).toBeVisible();
+  expect(await page.evaluate(() => Object.keys(document.body.dataset).filter((k) => k.startsWith("saw")))).toEqual([]);
+});
+
+test("a scroll gesture drops no pin and still scrolls", async ({ page }, testInfo) => {
+  test.skip(testInfo.project.use.browserName !== "chromium", "touch drag through CDP");
+  await openReady(page);
+  const cdp = await page.context().newCDPSession(page);
+  const touch = (type: "touchStart" | "touchMove" | "touchEnd", y: number) =>
+    cdp.send("Input.dispatchTouchEvent", {
+      type,
+      touchPoints: type === "touchEnd" ? [] : [{ x: 200, y, id: 1 }],
+    });
+  await touch("touchStart", 600);
+  for (let y = 590; y >= 300; y -= 10) await touch("touchMove", y);
+  await touch("touchEnd", 300);
+  await page.waitForTimeout(500);
+  await expect(pins(page)).toHaveCount(0);
+  await expect(sheet(page)).toBeHidden();
+  expect(await page.evaluate(() => window.scrollY)).toBeGreaterThan(50);
 });
 
 test("cancel removes the unsaved pin", async ({ page }) => {
@@ -169,6 +225,65 @@ test("unassigned page lets taps through", async ({ page }) => {
   await expect(overlay(page).getByRole("link", { name: "Back to your list" })).toBeVisible();
   await page.locator("#home-link").tap();
   await page.waitForURL("**/index.html");
+});
+
+test("a Turbo-style body swap restarts the overlay for the new path", async ({ page }) => {
+  const r = await freshReviewer("Turbo traveler");
+  const form = new FormData();
+  form.append(
+    "data",
+    JSON.stringify({
+      site: "fixture",
+      path: "/index.html",
+      device: "phone",
+      viewport_w: 390,
+      viewport_h: 844,
+      body: "Saved before the swap",
+      selector: "h1",
+      element_text: "Welcome to the fixture",
+      element_x: 0.1,
+      element_y: 0.5,
+      page_x: 40,
+      page_y: 60,
+    }),
+  );
+  const res = await fetch(`${SERVICE}/api/me/comments`, { method: "POST", headers: { Authorization: `Bearer ${r.token}` }, body: form });
+  expect(res.status).toBe(201);
+
+  await openAsReviewer(page, "/index.html", r.token);
+  await expect(bar(page)).toContainText("1 comment");
+  await expect(pins(page)).toHaveCount(1);
+  const original = await page.evaluate(() => document.body.outerHTML);
+
+  // Turbo Drive: push the new URL, replace <body>, fire turbo:load. t.js does not run again.
+  const swap = (path: string, html: string) =>
+    page.evaluate(
+      ([p, h]) => {
+        history.pushState({}, "", p);
+        const next = new DOMParser().parseFromString(`<!doctype html><html>${h}</html>`, "text/html").body;
+        document.body.replaceWith(document.adoptNode(next));
+        document.dispatchEvent(new Event("turbo:load", { bubbles: true }));
+      },
+      [path, html],
+    );
+  await swap(
+    "/other.html",
+    '<body><div style="height: 200px"></div><h1>The other page</h1><button id="b" type="button" onclick="document.body.dataset.clicked=1">Press</button></body>',
+  );
+  await expect(bar(page)).toContainText("This page isn't on your review list");
+  await expect(overlay(page)).toHaveCount(1);
+  await expect(pins(page)).toHaveCount(0);
+  await page.locator("#b").tap();
+  await expect.poll(() => page.evaluate(() => document.body.dataset.clicked)).toBe("1");
+  await expect(sheet(page)).toBeHidden();
+
+  await swap("/index.html", original);
+  await expect(bar(page)).toContainText("1 comment");
+  await expect(overlay(page)).toHaveCount(1);
+  await expect(pins(page)).toHaveCount(1);
+  await page.locator("#intro").tap();
+  await expect(sheet(page)).toBeVisible();
+  await expect(pins(page)).toHaveCount(2);
 });
 
 test("revoked link says so", async ({ page }) => {
@@ -337,6 +452,8 @@ test("saving records the spot and a screenshot", async ({ page }, testInfo) => {
   }, `data:${type};base64,${bytes.toString("base64")}`);
   expect(width).toBeGreaterThan(0);
   expect(width).toBeLessThanOrEqual(1200);
+  // A high-density phone gets a sharp image (about 1170 px for 390 px at 3x), not a 390 px one.
+  if ((testInfo.project.use.deviceScaleFactor ?? 1) > 1) expect(width).toBeGreaterThan(vw);
 
   await expect(bar(page)).not.toContainText("Saved", { timeout: 5000 });
 });
@@ -410,6 +527,30 @@ test("network failure keeps the text", async ({ page }) => {
   expect((await batch(r.id)).map((c) => c.body)).toEqual(["Do not lose me"]);
 });
 
+test("a save the service refuses says why, and keeps the text", async ({ page }) => {
+  const r = await freshReviewer("Refused saver");
+  await openAsReviewer(page, "/index.html", r.token);
+  await expect(bar(page)).toContainText("Reviewing");
+  await page.locator("h1").tap();
+  const box = sheet(page).locator("textarea");
+  await box.fill("Keep me through refusals");
+  const save = sheet(page).locator("[data-ttf=save]");
+  const warning = sheet(page).locator("[data-ttf=save-error]");
+  for (const [status, text] of [
+    [401, "This link no longer works. Ask for a new one."],
+    [403, "This page isn't on your review list."],
+    [500, "Couldn't save. Check your connection and try again."],
+  ] as const) {
+    await page.route("**/api/me/comments", (route) => route.fulfill({ status, body: "{}" }));
+    await save.tap();
+    await expect(warning).toHaveText(text);
+    await expect(box).toHaveValue("Keep me through refusals");
+    await expect(save).toBeEnabled();
+    await page.unroute("**/api/me/comments");
+  }
+  await expect(bar(page)).toContainText("0 comments");
+});
+
 test("saved pins come back after reload", async ({ page }) => {
   const r = await freshReviewer("Reloader");
   await openAsReviewer(page, "/index.html", r.token);
@@ -442,8 +583,11 @@ test("a save that never answers times out and keeps the text", async ({ page }) 
   const r = await freshReviewer("Hung saver");
   await openAsReviewer(page, "/index.html", r.token);
   await expect(bar(page)).toContainText("Reviewing");
+  let sent!: () => void;
+  const inFlight = new Promise<void>((resolve) => (sent = resolve));
   await page.route("**/api/me/comments", () => {
     // Never fulfilled: the request hangs until the overlay gives up on it.
+    sent();
   });
   await page.locator("h1").tap();
   const box = sheet(page).locator("textarea");
@@ -451,6 +595,9 @@ test("a save that never answers times out and keeps the text", async ({ page }) 
   const save = sheet(page).locator("[data-ttf=save]");
   await save.tap();
   await expect(save).toHaveText("Saving…");
+  // The screenshot can take a moment at 3x; once it lands the POST starts its 30 s timer.
+  await page.clock.fastForward(SHOT_WAIT_MS);
+  await inFlight;
   await page.waitForTimeout(300);
   await expect(save).toHaveText("Saving…"); // still waiting on the hung request
 

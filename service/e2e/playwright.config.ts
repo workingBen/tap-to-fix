@@ -14,7 +14,7 @@ export default defineConfig({
   projects: [
     {
       name: "phone",
-      use: { browserName: "chromium", viewport: { width: 390, height: 844 }, hasTouch: true, isMobile: true },
+      use: { browserName: "chromium", viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true },
     },
     {
       name: "firefox-desktop",
