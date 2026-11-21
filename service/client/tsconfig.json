@@ -1,5 +1,5 @@
 {
   "extends": "../tsconfig.json",
   "compilerOptions": { "lib": ["DOM", "ES2022"], "types": [] },
-  "include": ["."]
+  "include": [".", "../test/client"]
 }

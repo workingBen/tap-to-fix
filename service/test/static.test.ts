@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, statSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { beforeAll, describe, expect, it } from "vitest";
 
 describe("client build", () => {
@@ -10,6 +10,12 @@ describe("client build", () => {
   it("writes public/t.js and public/overlay.js", () => {
     expect(existsSync("public/t.js")).toBe(true);
     expect(existsSync("public/overlay.js")).toBe(true);
+  });
+
+  it("writes _headers allowing cross-origin JS", () => {
+    const h = readFileSync("public/_headers", "utf8");
+    expect(h).toContain("/*.js");
+    expect(h).toContain("Access-Control-Allow-Origin: *");
   });
 
   it("keeps the loader at or under 1500 bytes", () => {
