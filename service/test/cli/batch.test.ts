@@ -139,4 +139,27 @@ describe("ttf batch", () => {
     expect(await main(["batch", "nobody", "greensprings"], w.ctx)).toBe(2);
     expect(await main(["batch", "alexis"], w.ctx)).toBe(1);
   });
+
+  it("passes --status to the service", async () => {
+    const w = await world();
+    await w.env.DB.prepare("UPDATE comments SET status = 'done' WHERE id = ?").bind(w.c1).run();
+    const dir = join(w.cwd, "out");
+    await main(["batch", "alexis", "greensprings", "--out", dir], w.ctx);
+    expect(JSON.parse(readFileSync(join(dir, "batch.json"), "utf8")).comments.map((c: { id: string }) => c.id)).toEqual([w.c2]);
+    await main(["batch", "alexis", "greensprings", "--out", dir, "--status", "open,done"], w.ctx);
+    expect(JSON.parse(readFileSync(join(dir, "batch.json"), "utf8")).comments).toHaveLength(2);
+  });
+
+  it("rejects an unsafe comment id in a --from file and warns about --status", async () => {
+    const w = await world();
+    const file = join(w.cwd, "bad.json");
+    writeFileSync(
+      file,
+      JSON.stringify({ reviewer: { id: "r", name: "R" }, site: { slug: "s", name: "S", origin: "https://x" }, comments: [{ id: "../evil", page: { path: "/", title: "t", url: "u" }, body: "b" }], screenshots: { "../evil": { type: "image/png", base64: "AA==" } } }),
+    );
+    expect(await main(["batch", "--from", file, "--out", join(w.cwd, "o2"), "--status", "open"], w.ctx)).toBe(1);
+    expect(w.err.join()).toContain("Unsafe comment id");
+    expect(w.err.join()).toContain("--status is ignored");
+    expect(existsSync(join(w.cwd, "evil.png"))).toBe(false);
+  });
 });

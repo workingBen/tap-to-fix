@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it } from "vitest";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync, existsSync, utimesSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import app from "../../src/index";
@@ -69,6 +69,8 @@ describe("ttf status", () => {
     const w = await world();
     expect(await main(["status", w.id, "later"], w.ctx)).toBe(1);
     expect(w.err.join()).toContain("A note is required for later and kept");
+    expect(await main(["status", w.id, "bogus"], w.ctx)).toBe(1);
+    expect(await main(["status", w.id, "done", "--pr", "not-a-url"], w.ctx)).toBe(1);
     expect(await main(["status", w.id, "later", "--note", "next sprint"], w.ctx)).toBe(0);
     expect((await w.batchStatus())?.status).toBe("later");
   });
@@ -103,7 +105,10 @@ describe("ttf status", () => {
     await main(["status", w.id, "done", "--dir", w.dir], w.ctx);
     w.setOnline(true);
     expect(await main(["flush", "--dir", w.dir], w.ctx)).toBe(0);
-    expect(w.err.join()).toContain("Dropped gone-id: 404");
+    expect(w.err.join()).toContain("Rejected gone-id: 404");
+    const rej = readFileSync(join(w.dir, "rejected-status.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l));
+    expect(rej).toHaveLength(1);
+    expect(rej[0]).toMatchObject({ id: "gone-id", reason: expect.stringContaining("404") });
     expect(readFileSync(join(w.dir, "pending-status.jsonl"), "utf8")).toBe("");
     expect((await w.batchStatus())?.status).toBe("done");
   });
@@ -114,5 +119,72 @@ describe("ttf status", () => {
     rmSync(w.dir, { recursive: true });
     expect(await main(["status", w.id, "done"], w.ctx)).toBe(1);
     expect(w.err.join()).toContain("--dir");
+  });
+
+  it("validates offline too: nothing is queued for an invalid change", async () => {
+    const w = await world();
+    w.setOnline(false);
+    expect(await main(["status", w.id, "later"], w.ctx)).toBe(1);
+    expect(await main(["status", w.id, "kept", "--note", "  "], w.ctx)).toBe(1);
+    expect(existsSync(join(w.dir, "pending-status.jsonl"))).toBe(false);
+  });
+
+  it.each([
+    [401, "owner token rejected"],
+    [429, "429"],
+    [503, "503"],
+  ])("keeps queued lines when the service answers %i", async (code, why) => {
+    const w = await world();
+    w.setOnline(false);
+    await main(["status", w.id, "done", "--dir", w.dir], w.ctx);
+    await main(["status", w.id, "in_progress", "--dir", w.dir], w.ctx);
+    const file = join(w.dir, "pending-status.jsonl");
+    const before = readFileSync(file, "utf8");
+    const ctx = { ...w.ctx, fetchImpl: async () => Response.json({ error: "nope" }, { status: code }) };
+    expect(await main(["flush", "--dir", w.dir], ctx)).toBe(1);
+    expect(readFileSync(file, "utf8")).toBe(before);
+    expect(existsSync(join(w.dir, "rejected-status.jsonl"))).toBe(false);
+    expect(w.err.join()).toContain(why);
+  });
+
+  it("a mid-flush network failure keeps that line and the ones after it, in order", async () => {
+    const w = await world();
+    w.setOnline(false);
+    for (const st of ["in_progress", "done", "in_progress"]) await main(["status", w.id, st, "--dir", w.dir], w.ctx);
+    w.setOnline(true);
+    let n = 0;
+    const ctx = {
+      ...w.ctx,
+      fetchImpl: async (req: Request) => {
+        if (++n > 1) throw new TypeError("down");
+        return w.ctx.fetchImpl(req);
+      },
+    };
+    expect(await main(["flush", "--dir", w.dir], ctx)).toBe(1);
+    const left = readFileSync(join(w.dir, "pending-status.jsonl"), "utf8").trim().split("\n").map((l) => JSON.parse(l).body.status);
+    expect(left).toEqual(["done", "in_progress"]);
+  });
+
+  it("status queues into the dir holding the comment; flush with no --dir flushes every dir", async () => {
+    const w = await world();
+    const root = join(w.dir, "..");
+    const newer = join(root, "other-20261121-0900");
+    mkdirSync(newer);
+    writeFileSync(join(newer, "batch.json"), JSON.stringify({ comments: [{ id: "zzz" }] }));
+    writeFileSync(join(w.dir, "batch.json"), JSON.stringify({ comments: [{ id: w.id }] }));
+    utimesSync(join(w.dir, "batch.json"), new Date(2026, 10, 20), new Date(2026, 10, 20));
+    utimesSync(join(newer, "batch.json"), new Date(2026, 10, 21), new Date(2026, 10, 21));
+    w.setOnline(false);
+    await main(["status", w.id, "done"], w.ctx);
+    expect(existsSync(join(w.dir, "pending-status.jsonl"))).toBe(true);
+    expect(existsSync(join(newer, "pending-status.jsonl"))).toBe(false);
+    await main(["status", "zzz", "done"], w.ctx); // unknown id: falls back to newest dir
+    expect(existsSync(join(newer, "pending-status.jsonl"))).toBe(true);
+    w.setOnline(true);
+    w.out.length = 0;
+    expect(await main(["flush"], w.ctx)).toBe(0); // zzz is a 404: rejected and recorded; nothing left
+    expect(w.out.some((l) => l.startsWith(w.dir))).toBe(true);
+    expect(w.out.some((l) => l.startsWith(newer))).toBe(true);
+    expect((await w.batchStatus())?.status).toBe("done");
   });
 });

@@ -17,17 +17,39 @@ export function defaultDir(cwd, batch, now) {
   return join(cwd, ".tap-to-fix", `${batch.site.slug}-${slug(batch.reviewer.name)}-${stamp(now)}`);
 }
 
-/** The most recently written batch dir under cwd/.tap-to-fix, or null. */
-export function newestBatchDir(cwd) {
+/** Every batch dir under cwd/.tap-to-fix, oldest first. */
+export function batchDirs(cwd) {
   const root = join(cwd, ".tap-to-fix");
-  if (!existsSync(root)) return null;
-  const dirs = readdirSync(root)
+  if (!existsSync(root)) return [];
+  return readdirSync(root)
     .map((n) => join(root, n))
     .filter((d) => existsSync(join(d, "batch.json")))
     .map((d) => ({ d, t: statSync(join(d, "batch.json")).mtimeMs }))
-    .sort((a, b) => a.t - b.t || (a.d < b.d ? -1 : 1));
-  return dirs.length ? dirs[dirs.length - 1].d : null;
+    .sort((a, b) => a.t - b.t || (a.d < b.d ? -1 : 1))
+    .map((x) => x.d);
 }
+
+/** The most recently written batch dir under cwd/.tap-to-fix, or null. */
+export function newestBatchDir(cwd) {
+  const dirs = batchDirs(cwd);
+  return dirs.length ? dirs[dirs.length - 1] : null;
+}
+
+/** The newest batch dir whose batch.json contains this comment id; else the newest dir. */
+export function dirForComment(cwd, id) {
+  const dirs = batchDirs(cwd);
+  for (let i = dirs.length - 1; i >= 0; i--) {
+    try {
+      const b = JSON.parse(readFileSync(join(dirs[i], "batch.json"), "utf8"));
+      if (b.comments?.some((c) => c.id === id)) return dirs[i];
+    } catch {
+      // unreadable batch.json: skip
+    }
+  }
+  return dirs.length ? dirs[dirs.length - 1] : null;
+}
+
+const SAFE_ID = /^[A-Za-z0-9_-]+$/;
 
 /**
  * Write DIR/batch.json, DIR/shots/<id>.<ext> and DIR/queue.md.
@@ -38,6 +60,9 @@ export function writeBatch(dir, batch, shots) {
   const abs = resolve(dir);
   mkdirSync(join(abs, "shots"), { recursive: true });
   const { screenshots: _drop, ...rest } = batch;
+  for (const c of rest.comments) {
+    if (!SAFE_ID.test(String(c.id))) throw new Error("Unsafe comment id in batch: " + JSON.stringify(String(c.id).slice(0, 40)));
+  }
   const comments = rest.comments.map((c) => {
     const { screenshot_path: _p, screenshot: _s, ...base } = c;
     const shot = shots[c.id];

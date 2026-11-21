@@ -1,7 +1,9 @@
 import { loadConfig } from "./config.mjs";
 import { client, ApiError, NetworkError } from "./api.mjs";
 import { AmbiguousReviewer, UnknownReviewer, slug, resolveReviewer } from "./reviewers.mjs";
-import { writeBatch, readBatchFile, defaultDir, newestBatchDir } from "./batch.mjs";
+import { writeBatch, readBatchFile, defaultDir, newestBatchDir, batchDirs, dirForComment } from "./batch.mjs";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import { setStatus, flushPending } from "./status.mjs";
 
 /** Exit codes: 0 ok, 1 error, 2 ambiguous/unknown reviewer. */
@@ -57,6 +59,7 @@ export const commands = {
       let batch;
       let shots = {};
       if (flags.from) {
+        if (flags.status) ctx.err("Note: --status is ignored with --from; the file is used as-is.");
         ({ batch, shots } = readBatchFile(flags.from));
       } else {
         if (pos.length < 2) throw new Error("Usage: " + commands.batch.usage);
@@ -92,7 +95,7 @@ export const commands = {
       if (pos.length !== 2) throw new Error("Usage: " + commands.status.usage);
       const api = needConfig(ctx);
       if (!api) return EXIT.error;
-      const dir = flags.dir ?? newestBatchDir(cwdOf(ctx));
+      const dir = flags.dir ?? dirForComment(cwdOf(ctx), pos[0]);
       const r = await setStatus({ api, dir, id: pos[0], status: pos[1], pr: flags.pr, note: flags.note, now: ctx.now ? ctx.now() : new Date() });
       ctx.out(r.queued ? `Queued (offline): ${pos[0]} -> ${pos[1]} in ${dir}. Run ttf flush when the network is back.` : `${pos[0]} -> ${r.result.status ?? pos[1]}`);
       return EXIT.ok;
@@ -105,12 +108,22 @@ export const commands = {
       const { flags } = parseArgs(args);
       const api = needConfig(ctx);
       if (!api) return EXIT.error;
-      const dir = flags.dir ?? newestBatchDir(cwdOf(ctx));
-      if (!dir) throw new Error("No batch folder found; pass --dir DIR.");
-      const r = await flushPending(dir, api);
-      ctx.out(`Sent ${r.sent}, dropped ${r.dropped.length}, still queued ${r.remaining}.`);
-      for (const d of r.dropped) ctx.err(`Dropped ${d.id ?? "(unreadable)"}: ${d.reason}`);
-      return r.remaining ? EXIT.error : EXIT.ok;
+      const dirs = flags.dir
+        ? [flags.dir]
+        : batchDirs(cwdOf(ctx)).filter((d) => existsSync(join(d, "pending-status.jsonl")));
+      if (!flags.dir && !dirs.length) {
+        ctx.out("Nothing queued.");
+        return EXIT.ok;
+      }
+      let left = 0;
+      for (const dir of dirs) {
+        const r = await flushPending(dir, api, ctx.now ? ctx.now() : new Date());
+        ctx.out(`${dir}: sent ${r.sent}, rejected ${r.dropped.length}, still queued ${r.remaining}.`);
+        for (const d of r.dropped) ctx.err(`Rejected ${d.id ?? "(unreadable)"}: ${d.reason} (saved in ${join(dir, "rejected-status.jsonl")})`);
+        if (r.stopped) ctx.err(`Still queued in ${dir}: ${r.stopped}.`);
+        left += r.remaining;
+      }
+      return left ? EXIT.error : EXIT.ok;
     },
   },
 };
