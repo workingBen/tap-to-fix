@@ -211,4 +211,103 @@ owner.get("/overview", async (c) => {
   return c.json({ reviewers, assignments });
 });
 
+const STATUSES: readonly Status[] = ["open", "in_progress", "done", "later", "kept"];
+
+owner.get("/batch", async (c) => {
+  const reviewerId = str(c.req.query("reviewer"));
+  const siteSlug = str(c.req.query("site"));
+  if (!reviewerId || !siteSlug) return c.json({ error: "reviewer and site are required" }, 400);
+  const reviewer = await c.env.DB.prepare("SELECT id, name FROM reviewers WHERE id = ?")
+    .bind(reviewerId)
+    .first<{ id: string; name: string }>();
+  const site = await c.env.DB.prepare("SELECT slug, name, origin, repo FROM sites WHERE slug = ?")
+    .bind(siteSlug)
+    .first<{ slug: string; name: string; origin: string; repo: string }>();
+  if (!reviewer || !site) return c.json({ error: "Not found" }, 404);
+
+  const { results } = await c.env.DB.prepare(
+    `SELECT c.id, a.path, a.title, c.body, c.status, c.selector, c.element_text, c.element_x, c.element_y,
+            c.page_x, c.page_y, c.viewport_w, c.viewport_h, c.device,
+            c.screenshot_key IS NOT NULL AS has_screenshot, c.created_at
+       FROM comments c JOIN assignments a ON a.id = c.assignment_id
+      WHERE a.reviewer_id = ? AND a.site_slug = ? AND c.status = 'open'
+      ORDER BY c.created_at, c.id`,
+  )
+    .bind(reviewer.id, site.slug)
+    .all<Record<string, unknown>>();
+
+  return c.json({
+    reviewer,
+    site,
+    comments: results.map((r) => ({
+      id: r.id,
+      page: { path: r.path, title: r.title, url: site.origin + String(r.path) },
+      body: r.body,
+      status: r.status,
+      selector: r.selector,
+      element_text: r.element_text,
+      element_x: r.element_x,
+      element_y: r.element_y,
+      page_x: r.page_x,
+      page_y: r.page_y,
+      viewport_w: r.viewport_w,
+      viewport_h: r.viewport_h,
+      device: r.device,
+      has_screenshot: Boolean(r.has_screenshot),
+      created_at: r.created_at,
+    })),
+  });
+});
+
+owner.patch("/comments/:id", async (c) => {
+  const body = await readBody(c);
+  const status = str(body?.status) as Status | null;
+  if (!status || !STATUSES.includes(status)) return c.json({ error: "Unknown status" }, 400);
+  const note = str(body?.note);
+  const prUrl = str(body?.pr_url);
+  if ((status === "later" || status === "kept") && !note) {
+    return c.json({ error: "A note is required for later and kept" }, 400);
+  }
+  const id = c.req.param("id");
+  const row = await c.env.DB.prepare("SELECT status, note, pr_url, status_changed_at FROM comments WHERE id = ?")
+    .bind(id)
+    .first<{ status: Status; note: string | null; pr_url: string | null; status_changed_at: string | null }>();
+  if (!row) return c.json({ error: "Not found" }, 404);
+
+  const changed = row.status !== status;
+  await c.env.DB.prepare(
+    "UPDATE comments SET status = ?, note = ?, pr_url = ?, status_changed_at = ? WHERE id = ?",
+  )
+    .bind(
+      status,
+      note ?? row.note,
+      prUrl ?? row.pr_url,
+      changed ? new Date().toISOString() : row.status_changed_at,
+      id,
+    )
+    .run();
+  const updated = await c.env.DB.prepare(
+    "SELECT id, status, note, pr_url, status_changed_at FROM comments WHERE id = ?",
+  )
+    .bind(id)
+    .first();
+  return c.json(updated);
+});
+
+owner.get("/comments/:id/screenshot", async (c) => {
+  const row = await c.env.DB.prepare("SELECT screenshot_key FROM comments WHERE id = ?")
+    .bind(c.req.param("id"))
+    .first<{ screenshot_key: string | null }>();
+  if (!row?.screenshot_key) return c.json({ error: "Not found" }, 404);
+  const obj = await c.env.SHOTS.get(row.screenshot_key);
+  if (!obj) return c.json({ error: "Not found" }, 404);
+  return new Response(obj.body, {
+    headers: {
+      "Content-Type": obj.httpMetadata?.contentType ?? "application/octet-stream",
+      "Cache-Control": "private, no-store",
+      "X-Content-Type-Options": "nosniff",
+    },
+  });
+});
+
 export default owner;
