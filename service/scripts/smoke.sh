@@ -24,6 +24,14 @@ field() { python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(eva
 owner=(-H "Authorization: Bearer $OWNER_TOKEN" -H "Content-Type: application/json")
 
 req 200 GET /api/health
+
+# The tag script is served as JavaScript.
+ctype="$(curl -s -o /dev/null -w '%{content_type}' "$BASE/t.js")"
+case "$ctype" in
+  *javascript*) ;;
+  *) echo "smoke: FAIL GET /t.js content type was '$ctype'" >&2; exit 1 ;;
+esac
+req 200 GET /t.js
 req 201 POST /api/owner/sites "${owner[@]}" -d "{\"slug\":\"$SLUG\",\"name\":\"Smoke\",\"origin\":\"$ORIGIN\",\"repo\":\"example/smoke\"}"
 req 201 POST /api/owner/reviewers "${owner[@]}" -d '{"name":"Smoke Reviewer"}'
 RID="$(field 'd["id"]')"; RTOKEN="$(field 'd["token"]')"
