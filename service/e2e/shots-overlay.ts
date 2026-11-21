@@ -66,13 +66,28 @@ try {
     if (w === 390) {
       // One saved screenshot as the owner API serves it, to check the pin drawn onto it.
       const h = { Authorization: `Bearer ${OWNER_TOKEN}` };
-      const list = (await (await fetch(`${SERVICE}/api/owner/batch?reviewer=${rv.id}&site=fixture&status=open`, { headers: h })).json()) as { comments: { id: string; has_screenshot: boolean }[] };
-      const c = list.comments.find((x) => x.has_screenshot);
-      if (c) {
-        const res = await fetch(`${SERVICE}/api/owner/comments/${c.id}/screenshot`, { headers: h });
+      type Listed = { comments: { id: string; has_screenshot: boolean }[] };
+      const listed = async () => (await (await fetch(`${SERVICE}/api/owner/batch?reviewer=${rv.id}&site=fixture&status=open`, { headers: h })).json()) as Listed;
+      const saveShot = async (id: string, name: string) => {
+        const res = await fetch(`${SERVICE}/api/owner/comments/${id}/screenshot`, { headers: h });
         const ext = (res.headers.get("content-type") ?? "").includes("webp") ? "webp" : "jpg";
-        writeFileSync(join(out, `shot-sample.${ext}`), Buffer.from(await res.arrayBuffer()));
-      }
+        writeFileSync(join(out, `${name}.${ext}`), Buffer.from(await res.arrayBuffer()));
+      };
+      const first = (await listed()).comments.find((x) => x.has_screenshot);
+      if (first) await saveShot(first.id, "shot-sample");
+      // A tap within 20px of the right edge: the pin leans left so it stays on screen.
+      await sheet.getByRole("button", { name: "Close" }).tap();
+      await sheet.waitFor({ state: "hidden" });
+      const hb = (await page.locator("h1").boundingBox())!;
+      await page.touchscreen.tap(viewport.width - 12, hb.y + hb.height / 2);
+      await sheet.waitFor();
+      await sheet.locator("textarea").fill("Flip check at the right edge.");
+      await shoot(`overlay-flip-${w}.png`);
+      const before = new Set((await listed()).comments.map((x) => x.id));
+      await press(sheet.getByRole("button", { name: "Save comment" }));
+      await sheet.waitFor({ state: "hidden" });
+      const added = (await listed()).comments.find((x) => !before.has(x.id) && x.has_screenshot);
+      if (added) await saveShot(added.id, "shot-flip");
     }
     await ctx.close();
   }

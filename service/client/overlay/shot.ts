@@ -1,4 +1,5 @@
 import { domToCanvas } from "modern-screenshot";
+import { PIN_BODY_CX, PIN_BODY_CY, PIN_FLIP_MARGIN, pinPath, type Dir } from "./pin-shape";
 import { shrinkToFit, targetSize } from "./locate";
 
 const MAX_BYTES = 1_000_000;
@@ -22,46 +23,37 @@ async function captureViewport(exclude: Element): Promise<HTMLCanvasElement> {
   });
 }
 
-/** Teardrop path: sharp corner at (0,0), body toward (dir*s, -s), other corners round. */
-function teardrop(ctx: CanvasRenderingContext2D, x: number, y: number, s: number, dir: 1 | -1): void {
-  const r = s / 2;
-  const px = (v: number) => x + dir * v;
-  ctx.moveTo(px(0), y);
-  ctx.lineTo(px(0), y - r);
-  ctx.arcTo(px(0), y - s, px(r), y - s, r);
-  ctx.arcTo(px(s), y - s, px(s), y - r, r);
-  ctx.arcTo(px(s), y, px(r), y, r);
-  ctx.closePath();
-}
-
-/** Same pin as the on-page one: its point at (pin.x, pin.y), body up and to the right (left near the right edge). */
+/** Same pin as the on-page one (see pin-shape.ts): point at (pin.x, pin.y), body up and to the right,
+ *  left near the right edge. A draft pin is the accent color, as the reviewer saw it. */
 function drawPin(canvas: HTMLCanvasElement, pin: { x: number; y: number; n: number }, scale: number): void {
   const ctx = canvas.getContext("2d");
   if (!ctx) return;
-  const dir: 1 | -1 = pin.x + 44 > window.innerWidth ? -1 : 1;
-  const x = pin.x * scale;
-  const y = pin.y * scale;
-  const s = 30 * scale;
-  const ring = 3 * scale;
+  const dir: Dir = pin.x + PIN_FLIP_MARGIN > window.innerWidth ? -1 : 1;
+  const body = new Path2D(pinPath(dir));
   ctx.save();
-  // 3px ring, opaque, on the outside edge.
-  ctx.beginPath();
-  teardrop(ctx, x, y, s, dir);
-  teardrop(ctx, x + dir * ring, y - ring, s - 2 * ring, dir);
-  ctx.fillStyle = "#FBF8F2";
-  ctx.fill("evenodd");
-  // Body at 85% so words beside the point stay readable.
-  ctx.beginPath();
-  teardrop(ctx, x + dir * ring, y - ring, s - 2 * ring, dir);
-  ctx.globalAlpha = 0.85;
-  ctx.fillStyle = "#1F2A24";
-  ctx.fill();
+  ctx.translate(pin.x * scale, pin.y * scale);
+  ctx.scale(scale, scale);
+  // See-through ring: stroke outside the body only, so it is a 3px edge and never tints the fill.
+  ctx.save();
+  const cut = new Path2D();
+  cut.rect(-80, -90, 160, 120);
+  cut.addPath(body);
+  ctx.clip(cut, "evenodd");
+  ctx.globalAlpha = 0.7;
+  ctx.strokeStyle = "#FBF8F2";
+  ctx.lineWidth = 6;
+  ctx.lineJoin = "round";
+  ctx.stroke(body);
+  ctx.restore();
+  ctx.globalAlpha = 0.8;
+  ctx.fillStyle = "#2F6B4F";
+  ctx.fill(body);
   ctx.globalAlpha = 1;
   ctx.fillStyle = "#fff";
-  ctx.font = `bold ${17 * scale}px sans-serif`;
+  ctx.font = "bold 17px sans-serif";
   ctx.textAlign = "center";
   ctx.textBaseline = "middle";
-  ctx.fillText(String(pin.n), x + dir * (s / 2), y - s / 2 + scale);
+  ctx.fillText(String(pin.n), dir * PIN_BODY_CX, PIN_BODY_CY + 1);
   ctx.restore();
 }
 

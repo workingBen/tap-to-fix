@@ -46,16 +46,22 @@ svg { flex: none; }
   cursor: pointer; pointer-events: auto;
   -webkit-tap-highlight-color: transparent;
 }
-/* The teardrop's sharp point is the tap spot: the button's bottom-left corner (bottom-right when
-   flipped near the right edge). The body is a 30px square with one square corner, kept upright. */
+/* A map pin: the button is the 44px hit area around the round body; the tail's point (the 1px svg
+   origin) is the tap spot, 12px below the body. Flipped near the right edge, the body leans left. */
+.root .pin svg {
+  position: absolute; left: 12px; top: 49px; width: 1px; height: 1px; overflow: visible; pointer-events: none;
+  filter: drop-shadow(0 2px 3px rgba(0, 0, 0, .22));
+}
+.root .pin.flip svg { left: 32px; }
+.root .pin .body { fill: color-mix(in srgb, var(--ink) 80%, transparent); }
+.root .pin.settled .body, .root .pin.new .body { fill: color-mix(in srgb, var(--acc) 80%, transparent); }
+.root .pin .ring { fill: none; stroke: color-mix(in srgb, var(--bg) 70%, transparent); stroke-width: 6; stroke-linejoin: round; }
+.root .pin .mv { display: none; fill: none; stroke: var(--ink); stroke-width: 2; stroke-dasharray: 4 3; }
+.root .pin.moved .mv { display: block; }
 .root .pin .dot {
-  position: absolute; left: 0; bottom: 0; box-sizing: border-box;
-  width: 30px; height: 30px; border-radius: 50% 50% 50% 0;
+  position: absolute; left: 7px; top: 7px; width: 30px; height: 30px;
   display: grid; place-items: center;
-  font-weight: 700; font-size: 17px; line-height: 1;
-  border: 3px solid var(--bg); background-clip: padding-box;
-  background-color: color-mix(in srgb, var(--ink) 85%, transparent); color: #fff;
-  filter: drop-shadow(0 3px 4px rgba(0, 0, 0, .25));
+  font-weight: 700; font-size: 17px; line-height: 1; color: #fff;
 }
 /* The read sheet's badge keeps the plain round number. */
 .root .badge .dot {
@@ -65,14 +71,8 @@ svg { flex: none; }
 }
 .root .badge.settled .dot { background: var(--acc); }
 .root .badge.moved .dot { outline: 2px dashed var(--ink); outline-offset: 4px; }
-.root .pin.flip .dot { left: auto; right: 0; border-radius: 50% 50% 0 50%; }
-.root .pin.settled .dot { background-color: color-mix(in srgb, var(--acc) 85%, transparent); }
-.root .pin.moved .dot { outline: 2px dashed var(--ink); outline-offset: 4px; }
 .pin.new { pointer-events: none; }
-.root .pin.new .dot {
-  background-color: color-mix(in srgb, var(--acc) 85%, transparent);
-  filter: drop-shadow(0 0 0 transparent) drop-shadow(0 0 6px color-mix(in srgb, var(--acc) 55%, transparent));
-}
+.root .pin.new svg { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--acc) 55%, transparent)); }
 
 /* bottom sheet */
 .sheet {
