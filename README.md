@@ -12,14 +12,42 @@ npm run dev:node          # dev server on http://localhost:8787 (needs OWNER_TOK
 bash scripts/smoke.sh     # end-to-end check against the running dev server; ends with "smoke: ok"
 ```
 
-Production runs as a Cloudflare Worker (deploy comes in a later plan). Local dev and tests run on Node instead, because workerd needs macOS 13.5+. The Node dev server keeps its database in `service/.local/dev.sqlite`; screenshots live in memory and are lost on restart.
+Production runs as a Cloudflare Worker (see **Deploying** below). Local dev and tests run on Node instead, because workerd needs macOS 13.5+. The Node dev server keeps its database in `service/.local/dev.sqlite`; screenshots live in memory and are lost on restart.
+
+## Deploying
+
+From `service/`, after a one-time `node_modules/.bin/wrangler login`:
+
+```bash
+npm run deploy
+```
+
+It creates (or reuses) only the D1 database `tap-to-fix` and the R2 bucket `tap-to-fix-shots`, applies migrations, builds the client, sets the owner token as a Worker secret, deploys, and runs a read-only live check. It prints the script tag and, once, the owner link; the token is also saved in `~/.config/tap-to-fix/config.json` (mode 0600). Run it again to redeploy: it reuses the resources and the saved token (`--rotate-token` makes a new one).
+
+Two first-deploy snags:
+
+- **No workers.dev name yet.** A new Cloudflare account has none, and the deploy stops with "You need to register a workers.dev subdomain". Pick one in the dashboard (Workers & Pages), or `PUT /accounts/<id>/workers/subdomain` with `{"subdomain":"NAME"}`. A new name takes about two minutes to start answering, so the first live check after it can fail with "fetch failed"; run the deploy again.
+- **Safari sign-in fails** with "No CSRF value available in the session cookie". Run `wrangler login --browser=false` and open the printed link in another browser within about two minutes.
+
+Scripts calling the API should send a normal user agent: Cloudflare answers Python's default `Python-urllib` with 403 "error code: 1010". `curl` and Node's `fetch` are fine.
+
+## Claude Code plugin
+
+```
+/plugin marketplace add workingBen/tap-to-fix
+/plugin install tap-to-fix@tap-to-fix
+/tap-to-fix:setup                      # saves the service URL and owner token
+/tap-to-fix:fix alexis bonus-decade    # one reviewer's open comments on one site, as a review cycle
+```
+
+`/tap-to-fix:fix` downloads the batch (comments and screenshots) to `~/.tap-to-fix/batches/`, marks each comment in progress as work on it starts, and done with its PR link after merge. `--resume` picks up an interrupted run.
 
 ## Installing the tag on a site
 
 Register the site (`POST /api/owner/sites` with a slug, name, origin and repo), then add one line to the site's pages:
 
 ```html
-<script src="https://YOUR-SERVICE-ORIGIN/t.js" data-site="your-slug" async></script>
+<script src="https://YOUR-SERVICE-ORIGIN/t.js" data-site="your-slug" defer></script>
 ```
 
 The tag does nothing unless the visitor arrives with a reviewer link, so it is safe to ship on every page. Place it before any analytics tag, so the token is gone from the address bar before analytics reads it.
