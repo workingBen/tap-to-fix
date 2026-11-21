@@ -1,0 +1,21 @@
+{
+  "name": "tap-to-fix-service",
+  "version": "1.0.0",
+  "scripts": {
+    "test": "vitest run",
+    "dev": "wrangler dev",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "hono": "^4.13.19"
+  },
+  "devDependencies": {
+    "@cloudflare/vitest-pool-workers": "^0.23.0",
+    "@cloudflare/workers-types": "^5.20261120.1",
+    "typescript": "^7.0.2",
+    "vitest": "^4.1.12",
+    "wrangler": "^4.166.0"
+  },
+  "private": true,
+  "type": "module"
+}

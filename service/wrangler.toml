@@ -1,0 +1,17 @@
+name = "tap-to-fix"
+main = "src/index.ts"
+compatibility_date = "2026-11-01"
+
+# Placeholder bindings; deploy config is a later plan.
+[[d1_databases]]
+binding = "DB"
+database_name = "tap-to-fix"
+database_id = "local-placeholder"
+migrations_dir = "migrations"
+
+[[r2_buckets]]
+binding = "SHOTS"
+bucket_name = "tap-to-fix-shots"
+
+# OWNER_TOKEN: local dev reads it from the git-ignored .dev.vars;
+# tests set it in vitest.config.ts; prod uses `wrangler secret put`.
