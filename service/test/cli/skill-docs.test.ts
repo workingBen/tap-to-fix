@@ -130,3 +130,66 @@ describe("skill docs", () => {
     for (const cmd of commandText(fix())) expect(cmd).not.toMatch(/(status|flush)\b[^\n]*--dir/);
   });
 });
+
+describe("setup skill", () => {
+  const setupPath = join(skillsDir, "setup", "SKILL.md");
+  const setup = () => readFileSync(setupPath, "utf8");
+
+  it("exists with the frontmatter name and the trigger", () => {
+    expect(skillFiles()).toContain(setupPath);
+    const md = setup();
+    expect(md).toMatch(/^---\nname: setup\n/);
+    expect(md).toContain("/tap-to-fix:setup");
+  });
+
+  it("confirms before creating anything, showing the dry run", () => {
+    const md = setup();
+    const confirmAt = md.indexOf("## 1. Confirm first");
+    const deployAt = md.indexOf("## 3. Deploy");
+    expect(confirmAt).toBeGreaterThan(-1);
+    expect(confirmAt).toBeLessThan(deployAt);
+    expect(md).toContain("npm run deploy -- --dry-run");
+    expect(md).toMatch(/Wait for a yes/);
+  });
+
+  it("runs the deploy script in the plugin's service folder, resolved from the skill's base directory", () => {
+    const md = setup();
+    expect(md).toContain("Base directory for this skill");
+    expect(md).toContain("<dir>/../../service");
+    expect(md).toMatch(/cd "<service dir>" && [^\n]*npm run deploy\)/);
+    expect(md).not.toContain("CLAUDE_PLUGIN_ROOT");
+    expect(md).toMatch(/Shell variables do not survive between Bash calls/);
+  });
+
+  it("handles not signed in by asking the user to run wrangler login with !", () => {
+    const md = setup();
+    expect(md).toMatch(/Exit `3`/);
+    expect(md).toMatch(/`! cd "<service dir>" && npx wrangler login`/);
+    expect(md).toMatch(/Wait until the user says it worked/);
+  });
+
+  it("relays the script tag and the owner link once, and says to save the link", () => {
+    const md = setup();
+    expect(md).toContain('data-site="your-site-slug"');
+    expect(md).toContain("/o/#owner=");
+    expect(md).toMatch(/exactly once/);
+    expect(md).toMatch(/Save this link/);
+    expect(md).toMatch(/Do not repeat the owner link/);
+  });
+
+  it("names only its own resources and forbids other wrangler commands", () => {
+    const md = setup();
+    expect(md).toContain("`tap-to-fix-shots`");
+    expect(md).toMatch(/Never run any other `wrangler` command/);
+    for (const cmd of commandText(md)) {
+      const wr = cmd.match(/wrangler\s+([a-z0-9]+(?:\s+[a-z0-9]+)?)/g) ?? [];
+      for (const w of wr) expect(["wrangler login"], cmd).toContain(w);
+    }
+  });
+
+  it("explains adding sites from the owner dashboard", () => {
+    const md = setup();
+    expect(md).toMatch(/Add a site/);
+    expect(md).toMatch(/Add a reviewer/);
+  });
+});
