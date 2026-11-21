@@ -13,14 +13,21 @@ export function stamp(now) {
   return `${now.getFullYear()}${p(now.getMonth() + 1)}${p(now.getDate())}-${p(now.getHours())}${p(now.getMinutes())}`;
 }
 
-export function defaultDir(cwd, batch, now) {
-  return join(cwd, ".tap-to-fix", `${batch.site.slug}-${slug(batch.reviewer.name)}-${stamp(now)}`);
+/**
+ * Where batch folders live: TTF_HOME/batches when set, else ~/.tap-to-fix/batches.
+ * Outside any checkout, so a batch is never committed and every worktree finds it.
+ */
+export function batchRoot({ env = {}, home }) {
+  return env.TTF_HOME ? join(resolve(env.TTF_HOME), "batches") : join(home, ".tap-to-fix", "batches");
 }
 
-/** Every batch dir under cwd/.tap-to-fix, oldest first. */
-export function batchDirs(cwd) {
-  const root = join(cwd, ".tap-to-fix");
-  if (!existsSync(root)) return [];
+export function defaultDir(root, batch, now) {
+  return join(root, `${batch.site.slug}-${slug(batch.reviewer.name)}-${stamp(now)}`);
+}
+
+/** Every batch dir directly under root (see batchRoot), oldest first. */
+export function batchDirs(root) {
+  if (!root || !existsSync(root)) return [];
   return readdirSync(root)
     .map((n) => join(root, n))
     .filter((d) => existsSync(join(d, "batch.json")))
@@ -29,15 +36,15 @@ export function batchDirs(cwd) {
     .map((x) => x.d);
 }
 
-/** The most recently written batch dir under cwd/.tap-to-fix, or null. */
-export function newestBatchDir(cwd) {
-  const dirs = batchDirs(cwd);
+/** The most recently written batch dir under root, or null. */
+export function newestBatchDir(root) {
+  const dirs = batchDirs(root);
   return dirs.length ? dirs[dirs.length - 1] : null;
 }
 
 /** The newest batch dir whose batch.json contains this comment id; else the newest dir. */
-export function dirForComment(cwd, id) {
-  const dirs = batchDirs(cwd);
+export function dirForComment(root, id) {
+  const dirs = batchDirs(root);
   for (let i = dirs.length - 1; i >= 0; i--) {
     try {
       const b = JSON.parse(readFileSync(join(dirs[i], "batch.json"), "utf8"));
@@ -87,7 +94,7 @@ export function queueMarkdown(batch, dir) {
     const shot = c.screenshot_path ? join(abs, c.screenshot_path) : "missing";
     const viewport = c.viewport_w && c.viewport_h ? `${c.viewport_w}x${c.viewport_h}` : "unknown viewport";
     lines.push(
-      `${i + 1}. ${oneLine(c.page.title) || c.page.path} — ${c.page.url}`,
+      `${i + 1}. [ttf ${c.id}] ${oneLine(c.page.title) || c.page.path} — ${c.page.url}`,
       q,
       `   - Element text: ${oneLine(c.element_text) || "(none)"}`,
       `   - Selector: ${oneLine(c.selector) || "(none)"}`,

@@ -29,16 +29,15 @@ async function world() {
     .run();
   const cwd = mkdtempSync(join(tmpdir(), "ttf-status-"));
   tmps.push(cwd);
-  const dir = join(cwd, ".tap-to-fix", "greensprings-alexis-rivera-20261120-0905");
+  const dir = join(cwd, "batches", "greensprings-alexis-rivera-20261120-0905");
   mkdirSync(dir, { recursive: true });
   writeFileSync(join(dir, "batch.json"), "{}");
   const out: string[] = [];
   const err: string[] = [];
   let online = true;
   const ctx = {
-    env: { TTF_SERVICE: "http://svc", TTF_OWNER_TOKEN: env.OWNER_TOKEN },
+    env: { TTF_SERVICE: "http://svc", TTF_OWNER_TOKEN: env.OWNER_TOKEN, TTF_HOME: cwd },
     home: "/nonexistent",
-    cwd,
     fetchImpl: async (req: Request) => {
       if (!online) throw new TypeError("fetch failed " + env.OWNER_TOKEN);
       return app.fetch(req, env);

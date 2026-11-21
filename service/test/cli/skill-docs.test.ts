@@ -56,9 +56,10 @@ describe("skill docs", () => {
     for (const f of skillFiles()) {
       const md = readFileSync(f, "utf8");
       for (const m of md.matchAll(/ttf\.mjs"?\s+([a-z][a-z_-]*)/g)) named.add(m[1]);
+      for (const m of md.matchAll(/<TTF>\s+([a-z][a-z_-]*)/g)) named.add(m[1]);
       for (const m of md.matchAll(/`ttf\s+([a-z][a-z_-]*)/g)) named.add(m[1]);
     }
-    expect(named.size).toBeGreaterThan(0);
+    expect([...named]).toEqual(expect.arrayContaining(["batch", "status", "flush", "progress"]));
     for (const n of named) expect(Object.keys(commands), `ttf ${n}`).toContain(n);
   });
 
@@ -92,13 +93,40 @@ describe("skill docs", () => {
 
   it("fix skill carries all five status rules and the flush", () => {
     const md = fix();
-    expect(md).toMatch(/ttf\.mjs" status <id> in_progress/);
-    expect(md).toMatch(/ttf\.mjs" status <id> done --pr /);
-    expect(md).toMatch(/ttf\.mjs" status <id> later --note /);
-    expect(md).toMatch(/ttf\.mjs" status <id> kept --note /);
+    expect(md).toMatch(/<TTF> status <id> in_progress`/);
+    expect(md).toMatch(/<TTF> status <id> done --pr /);
+    expect(md).toMatch(/<TTF> status <id> later --note '/);
+    expect(md).toMatch(/<TTF> status <id> kept --note '/);
     expect(md).toMatch(/design review[^\n]*stays `in_progress`/i);
-    expect(md).toMatch(/ttf\.mjs" flush/);
+    expect(md).toMatch(/<TTF> flush/);
     expect(md).toMatch(/Never mark a comment `done` before its PR is merged/);
-    expect(md).toContain("${CLAUDE_PLUGIN_ROOT}/bin/ttf.mjs");
+    expect(md).toMatch(/start Investigate[^\n]*\*\*not\*\* at intake/);
+  });
+
+  it("fix skill resolves the CLI from the skill's base directory, not an env var", () => {
+    const md = fix();
+    expect(md).toContain("Base directory for this skill");
+    expect(md).toContain("<dir>/../../bin/ttf.mjs");
+    expect(md).not.toContain("CLAUDE_PLUGIN_ROOT");
+    expect(md).toMatch(/Shell variables do not survive between Bash calls/);
+    for (const cmd of commandText(md)) expect(cmd, "no shell variables carried across calls").not.toMatch(/\$DIR\b/);
+  });
+
+  it("fix skill survives checkpoints: resume line, progress, id tags", () => {
+    const md = fix();
+    expect(md).toContain("/tap-to-fix:fix <reviewer> <site> --resume");
+    expect(md).toMatch(/<TTF> progress <reviewer> <site>/);
+    expect(md).toContain("[ttf <comment id>]");
+    expect(md).toMatch(/not final/);
+  });
+
+  it("fix skill never reports a repo-check crash as the wrong repo", () => {
+    const md = fix();
+    expect(md).toContain("process.exit(3)");
+    expect(md).toMatch(/Never report a crash as "wrong repo"/);
+  });
+
+  it("no status or flush call in the skill passes --dir (folders live under ~/.tap-to-fix/batches)", () => {
+    for (const cmd of commandText(fix())) expect(cmd).not.toMatch(/(status|flush)\b[^\n]*--dir/);
   });
 });

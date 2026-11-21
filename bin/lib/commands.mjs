@@ -1,10 +1,11 @@
 import { loadConfig } from "./config.mjs";
 import { client, ApiError, NetworkError } from "./api.mjs";
 import { AmbiguousReviewer, UnknownReviewer, slug, resolveReviewer } from "./reviewers.mjs";
-import { writeBatch, readBatchFile, defaultDir, newestBatchDir, batchDirs, dirForComment } from "./batch.mjs";
+import { writeBatch, readBatchFile, defaultDir, batchDirs, dirForComment, batchRoot } from "./batch.mjs";
 import { existsSync } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { setStatus, flushPending } from "./status.mjs";
+import { progress } from "./progress.mjs";
 
 /** Exit codes: 0 ok, 1 error, 2 ambiguous/unknown reviewer. */
 export const EXIT = { ok: 0, error: 1, reviewer: 2 };
@@ -36,7 +37,7 @@ function parseArgs(args) {
   return { pos, flags };
 }
 
-const cwdOf = (ctx) => ctx.cwd ?? process.cwd();
+const rootOf = (ctx) => batchRoot({ env: ctx.env, home: ctx.home });
 
 /** The command table. Each entry: { usage, summary, run(args, ctx) => exit code }. */
 export const commands = {
@@ -79,7 +80,7 @@ export const commands = {
           }
         }
       }
-      const dir = flags.out ?? defaultDir(cwdOf(ctx), batch, ctx.now ? ctx.now() : new Date());
+      const dir = flags.out ? resolve(flags.out) : defaultDir(rootOf(ctx), batch, ctx.now ? ctx.now() : new Date());
       const written = writeBatch(dir, batch, shots);
       const missing = written.comments.filter((c) => c.screenshot === "missing" && c.has_screenshot).length;
       ctx.out(dir);
@@ -99,7 +100,7 @@ export const commands = {
       if (pos.length !== 2) throw new Error("Usage: " + commands.status.usage);
       const api = needConfig(ctx);
       if (!api) return EXIT.error;
-      const dir = flags.dir ?? dirForComment(cwdOf(ctx), pos[0]);
+      const dir = flags.dir ?? dirForComment(rootOf(ctx), pos[0]);
       const r = await setStatus({ api, dir, id: pos[0], status: pos[1], pr: flags.pr, note: flags.note, now: ctx.now ? ctx.now() : new Date() });
       ctx.out(r.queued ? `Queued (offline): ${pos[0]} -> ${pos[1]} in ${dir}. Run ttf flush when the network is back.` : `${pos[0]} -> ${r.result.status ?? pos[1]}`);
       return EXIT.ok;
@@ -114,7 +115,7 @@ export const commands = {
       if (!api) return EXIT.error;
       const dirs = flags.dir
         ? [flags.dir]
-        : batchDirs(cwdOf(ctx)).filter((d) => existsSync(join(d, "pending-status.jsonl")));
+        : batchDirs(rootOf(ctx)).filter((d) => existsSync(join(d, "pending-status.jsonl")));
       if (!flags.dir && !dirs.length) {
         ctx.out("Nothing queued.");
         return EXIT.ok;
@@ -128,6 +129,24 @@ export const commands = {
         left += r.remaining;
       }
       return left ? EXIT.error : EXIT.ok;
+    },
+  },
+  progress: {
+    usage: "ttf progress <reviewer> <site>",
+    summary: "Offline: the newest batch folder for a reviewer + site, and each comment's last known status",
+    async run(args, ctx) {
+      const { pos } = parseArgs(args);
+      if (pos.length !== 2) throw new Error("Usage: " + commands.progress.usage);
+      const p = progress(rootOf(ctx), pos[0], pos[1]);
+      ctx.out(`Folder: ${p.dir}`);
+      ctx.out(`Queue: ${p.queue}`);
+      for (const i of p.items) {
+        const extra = [i.queued ? "queued offline" : "", i.pr ?? "", i.note ? `note: ${i.note}` : ""].filter(Boolean).join(" · ");
+        ctx.out(`${i.id} · ${i.status} · ${i.final ? "final" : "not final"}${extra ? " · " + extra : ""} · ${i.page} · ${i.body.slice(0, 60)}`);
+      }
+      const left = p.items.filter((i) => !i.final).length;
+      ctx.out(`${p.items.length} comment${p.items.length === 1 ? "" : "s"}, ${left} not final.`);
+      return EXIT.ok;
     },
   },
 };

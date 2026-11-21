@@ -3,6 +3,13 @@ import { join } from "node:path";
 import { ApiError, NetworkError } from "./api.mjs";
 
 const file = (dir) => join(dir, "pending-status.jsonl");
+export const LOG = "status-log.jsonl";
+
+/** Append to DIR/status-log.jsonl: every change sent or queued (never a rejected one). */
+function logStatus(dir, entry) {
+  if (!dir || !existsSync(dir)) return;
+  appendFileSync(join(dir, LOG), JSON.stringify(entry) + "\n");
+}
 
 const STATUSES = ["open", "in_progress", "done", "later", "kept"];
 
@@ -34,14 +41,19 @@ export async function setStatus({ api, dir, id, status, pr, note, now = new Date
   const body = { status };
   if (note !== undefined) body.note = note;
   if (pr !== undefined) body.pr_url = pr;
+  const at = now.toISOString();
+  let result;
   try {
-    return { queued: false, result: await api.patch(id, body) };
+    result = await api.patch(id, body);
   } catch (e) {
     if (!(e instanceof NetworkError)) throw e;
     if (!dir) throw new Error(e.message + ". No batch folder to queue into; pass --dir DIR.");
-    appendFileSync(file(dir), JSON.stringify({ id, body, at: now.toISOString() }) + "\n");
+    appendFileSync(file(dir), JSON.stringify({ id, body, at }) + "\n");
+    logStatus(dir, { id, ...body, state: "queued", at });
     return { queued: true, message: e.message };
   }
+  logStatus(dir, { id, ...body, state: "sent", at });
+  return { queued: false, result };
 }
 
 /**
@@ -73,6 +85,7 @@ export async function flushPending(dir, api, now = new Date()) {
     try {
       await api.patch(item.id, item.body);
       res.sent++;
+      logStatus(dir, { id: item.id, ...item.body, state: "sent", at: now.toISOString(), queued_at: item.at });
     } catch (e) {
       if (isPermanent(e)) reject({ id: item.id, line, reason: `${e.status} ${e.message}` });
       else if (e instanceof NetworkError || e instanceof ApiError) {

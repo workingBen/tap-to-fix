@@ -55,9 +55,8 @@ async function world() {
   const err: string[] = [];
   const cwd = tmp();
   const ctx = {
-    env: { TTF_SERVICE: "http://svc", TTF_OWNER_TOKEN: env.OWNER_TOKEN },
+    env: { TTF_SERVICE: "http://svc", TTF_OWNER_TOKEN: env.OWNER_TOKEN, TTF_HOME: join(cwd, "ttf-home") },
     home: "/nonexistent",
-    cwd,
     now: () => new Date(2026, 10, 20, 9, 5),
     fetchImpl: (req: Request) => app.fetch(req, env),
     out: (s: string) => out.push(s),
@@ -88,10 +87,25 @@ describe("ttf batch", () => {
     expect(w.out.join() + w.err.join() + JSON.stringify(batch)).not.toContain(w.env.OWNER_TOKEN);
   });
 
-  it("uses the default folder name", async () => {
+  it("uses the default folder name, under TTF_HOME/batches", async () => {
     const w = await world();
     expect(await main(["batch", "alexis", "greensprings"], w.ctx)).toBe(0);
-    expect(w.out[0]).toBe(join(w.cwd, ".tap-to-fix", "greensprings-alexis-rivera-20261120-0905"));
+    expect(w.out[0]).toBe(join(w.cwd, "ttf-home", "batches", "greensprings-alexis-rivera-20261120-0905"));
+  });
+
+  it("defaults to ~/.tap-to-fix/batches without TTF_HOME", async () => {
+    const w = await world();
+    const ctx = { ...w.ctx, env: { TTF_SERVICE: "http://svc", TTF_OWNER_TOKEN: w.env.OWNER_TOKEN }, home: w.cwd };
+    expect(await main(["batch", "alexis", "greensprings"], ctx)).toBe(0);
+    expect(w.out[0]).toBe(join(w.cwd, ".tap-to-fix", "batches", "greensprings-alexis-rivera-20261120-0905"));
+  });
+
+  it("puts the comment id in each queue item's first line", async () => {
+    const w = await world();
+    const dir = join(w.cwd, "out");
+    await main(["batch", "alexis", "greensprings", "--out", dir], w.ctx);
+    const items = readFileSync(join(dir, "queue.md"), "utf8").split("\n").filter((l) => /^\d+\. /.test(l));
+    expect(items).toEqual([expect.stringMatching(new RegExp(`^1\\. \\[ttf ${w.c1}\\] `)), expect.stringMatching(new RegExp(`^2\\. \\[ttf ${w.c2}\\] `))]);
   });
 
   it("marks a screenshot that 404s as missing and still exits 0", async () => {
