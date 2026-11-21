@@ -30,6 +30,12 @@ The owner creates a reviewer and an assignment (a page path on a site). The revi
 
 Without a token, nothing appears. On a page not assigned to the reviewer, the bar says "This page isn't on your review list" and every tap goes through to the page as usual. On sites that swap pages without a full reload (Turbo Drive, other routers), the comment layer follows along on `turbo:load`, `popstate` and `pageshow`.
 
+## Dashboards
+
+**Owner (`/o/`).** Open `https://YOUR-SERVICE-ORIGIN/o/#owner=OWNER_TOKEN` once. The page saves the token in `localStorage`, removes it from the address bar and shows the list of reviewers, pages and sites; on a later visit `/o/` alone works from the same browser. If the token is missing or wrong, the page asks you to paste it. From there you add sites, reviewers and assigned pages, copy each "ready for a review cycle" command (`/tap-to-fix:fix <first name> <site slug>`), and use **New link** or **Turn off link** on a reviewer. A reviewer's link is shown once, right after you add or reissue it.
+
+**Reviewer (`/r/`).** Text each reviewer the link the owner page shows after you add them: `https://YOUR-SERVICE-ORIGIN/r/#ttf=THEIR_TOKEN`. It opens their list of pages with status chips; tapping a page opens the live site with the comment layer on. The token stays in the address bar so the page can be added to a phone's home screen. **New link** makes the old one stop working.
+
 ## Browser tests
 
 ```bash

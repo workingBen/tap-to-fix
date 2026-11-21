@@ -4,6 +4,7 @@
 import { chromium } from "@playwright/test";
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
+import { measure } from "./measure";
 import globalSetup, { OWNER_TOKEN, SERVICE } from "./global-setup";
 
 const out = process.argv[2];
@@ -71,7 +72,6 @@ try {
   for (const [name, viewport, mobile] of [
     ["o-1440.png", { width: 1440, height: 900 }, false],
     ["o-1280.png", { width: 1280, height: 800 }, false],
-    ["o-1200.png", { width: 1200, height: 800 }, false],
     ["o-390.png", { width: 390, height: 844 }, true],
   ] as const) {
     const ctx = await browser.newContext({ viewport, deviceScaleFactor: mobile ? 3 : 1, isMobile: mobile, hasTouch: mobile });
@@ -80,6 +80,7 @@ try {
     await page.locator("tr[data-row]").first().waitFor();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     if (overflow) console.warn(`${name}: horizontal overflow`);
+    console.log("MEASURE", name, JSON.stringify(await measure(page)));
     await page.screenshot({ path: join(out, name), fullPage: true });
 
     if (mobile) {

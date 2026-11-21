@@ -236,3 +236,24 @@ test("wrong owner token shows the token form", async ({ page }) => {
   await page.getByRole("button", { name: "Open" }).click();
   await expect(page.getByRole("heading", { name: "Reviewers" })).toBeVisible();
 });
+
+// ---- No horizontal scroll at 390 px (the phone project) ----
+
+const LONG_TITLE = "A very long page title that keeps going and going so that it has to wrap onto several lines on a phone screen without pushing sideways ".slice(0, 120);
+const LONG_PATH = "/reports/emf/2026-loft-assessment-with-an-extremely-long-path-segment-that-has-no-break-points-at-all-and-keeps-going";
+
+test("no horizontal scroll at 390 px with a 120-character title and a long path", async ({ page }) => {
+  expect(LONG_TITLE).toHaveLength(120);
+  const r = await reviewerWith("Dana Long", [{ path: LONG_PATH, title: LONG_TITLE }]);
+  await comment(r.token, LONG_PATH, "Comment");
+
+  await dashboard(page, r.token);
+  await expect(row(page, LONG_TITLE.slice(0, 40))).toBeVisible();
+  expect(await page.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(390);
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+
+  await page.goto(OWNER_URL());
+  await reviewerButton(page, "Dana Long").click();
+  await expect(ownerRow(page, LONG_TITLE.slice(0, 40))).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
