@@ -31,6 +31,31 @@ async function openReady(page: Page): Promise<void> {
   await expect(bar(page)).toContainText("Reviewing");
 }
 
+test("the review pill floats at the bottom center and leaves the header uncovered", async ({ page }) => {
+  await openReady(page);
+  const m = await bar(page).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { top: r.top, bottom: r.bottom, cx: r.left + r.width / 2, w: innerWidth, h: innerHeight };
+  });
+  expect(m.bottom).toBeLessThanOrEqual(m.h - 12);
+  expect(Math.abs(m.cx - m.w / 2)).toBeLessThanOrEqual(2);
+  expect(m.top).toBeGreaterThan(m.h / 2);
+  const headerIsHost = await page.evaluate(() => document.elementFromPoint(innerWidth / 2, 10)?.tagName === "TAP-TO-FIX-OVERLAY");
+  expect(headerIsHost).toBe(false);
+});
+
+test("phone pill is one line without the count; desktop shows the count @desktop", async ({ page }) => {
+  await openReady(page);
+  const count = overlay(page).locator("[data-ttf=count]");
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(count).toBeHidden();
+  expect((await bar(page).boundingBox())!.height).toBeLessThan(64);
+  await page.setViewportSize({ width: 1280, height: 800 });
+  await expect(count).toBeVisible();
+  await expect(count).toContainText("Reviewing");
+  await expect(count).toContainText("0 comments");
+});
+
 test("ordinary visitor sees nothing", async ({ page }) => {
   const serviceRequests: string[] = [];
   page.on("request", (r) => {

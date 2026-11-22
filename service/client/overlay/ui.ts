@@ -116,8 +116,12 @@ export class OverlayUI {
         content = [el("span", { class: "msg" }, "Opening your review…")];
         break;
       case "reviewing":
-        content = [el("span", { class: "msg" }, el("b", {}, "Reviewing"), ` · ${countLabel(state.count)}`)];
-        content.push(link("Done"));
+        // Task 3 puts the mode group between the count and the divider.
+        content = [
+          el("span", { class: "msg count", "data-ttf": "count" }, el("b", {}, "Reviewing"), ` · ${countLabel(state.count)}`),
+          el("span", { class: "vr", "aria-hidden": "true" }),
+          link("Done"),
+        ];
         break;
       case "not_assigned":
         content = [warn("This page isn't on your review list"), link("Back to your list")];
@@ -129,7 +133,7 @@ export class OverlayUI {
         content = [warn("Can't reach the review service right now.")];
         break;
     }
-    // Replace everything except the live region, which stays put (CSS order places it before Done).
+    // Replace everything except the live region, which stays put (it is positioned absolutely above the pill).
     for (const n of [...this.bar.childNodes]) if (n !== this.savedNote) n.remove();
     this.bar.prepend(...content);
     const saved = state.kind === "reviewing" && !!state.saved;
@@ -265,6 +269,7 @@ export class OverlayUI {
   closeSheet(canceled = true): void {
     if (this.sheet.hidden) return;
     this.sheet.hidden = true;
+    this.root.classList.remove("sheet-open");
     this.sheet.classList.remove("open");
     this.sheet.replaceChildren();
     this.mayDismiss = null;
@@ -279,6 +284,7 @@ export class OverlayUI {
     this.sheet.setAttribute("aria-labelledby", "ttf-sheet-h");
     this.onSheetClose = onClose;
     this.sheet.hidden = false;
+    this.root.classList.add("sheet-open");
     void this.sheet.offsetHeight; // start the slide-up from the closed position
     this.sheet.classList.add("open");
   }

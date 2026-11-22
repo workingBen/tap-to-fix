@@ -16,28 +16,35 @@ export const OVERLAY_CSS =
 }
 svg { flex: none; }
 
-/* top bar */
+/* floating review pill, bottom center */
 .bar {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 2147483647;
-  min-height: 52px; padding: 4px 8px 4px 16px;
-  display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px;
-  background: var(--surf); border-bottom: 1px solid var(--line);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, .06);
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(18px + env(safe-area-inset-bottom));
+  z-index: 2147483647; max-width: calc(100vw - 16px); min-height: 52px; padding: 4px 6px 4px 16px;
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surf); border: 1px solid var(--line); border-radius: 999px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .28);
 }
 .bar[hidden] { display: none; }
+.root.sheet-open .bar { visibility: hidden; }
 .bar .msg { color: var(--mut); display: inline-flex; align-items: center; gap: 8px; }
+.bar .count { white-space: nowrap; padding-right: 6px; }
 .bar b { color: var(--ink); font-weight: 600; }
 .bar a {
-  margin-left: auto; min-height: 44px; padding: 0 8px;
+  min-height: 44px; padding: 0 12px; flex: none;
   display: inline-flex; align-items: center;
   color: var(--acc); font-weight: 700; text-decoration: none;
 }
 .bar a:focus-visible, .sheet button:focus-visible, .pin:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
 .bar .msg svg { color: var(--warn); }
-.root .bar .saved { color: var(--acc); font-weight: 600; display: inline-flex; align-items: center; gap: 6px; order: 1; }
+.bar .vr { width: 1px; align-self: stretch; background: var(--line); margin: 6px 2px; flex: none; }
+/* "Saved" floats just above the pill, so it never widens it. */
+.root .bar .saved {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 8px);
+  white-space: nowrap; color: var(--acc); font-weight: 600; display: inline-flex; align-items: center; gap: 6px;
+}
 .root .bar .saved:empty { display: none; }
-.bar a { order: 2; }
 .bar .saved svg { color: var(--acc); }
+@media (max-width: 599px) { .bar .count { display: none; } }
 
 /* pins: a zero-size layer in document coordinates */
 .pins { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 2147483646; pointer-events: none; }
