@@ -375,6 +375,17 @@ describe("assign pages panel", () => {
       ]);
       expect(already.map((x) => x.id)).toEqual(["n3"]);
     });
+    it("two reviewers who share a first name both count, by full name", () => {
+      const smith = { id: "r4", name: "Alexis Smith" };
+      const clash: Overview = {
+        reviewers: [ALEXIS, BEN, { ...BEN, id: "r4", name: "Alexis Smith" }],
+        assignments: [
+          a({ id: "c2", path: "/sauna", reviewer: smith, created_at: at(0) }),
+          a({ id: "c1", path: "/sauna", created_at: at(1) }),
+        ],
+      };
+      expect(pageCandidates(clash, "r2").candidates[0].lastAssignedTo).toEqual(["Alexis Smith", "Alexis Rivera"]);
+    });
     it("sorts by the latest assignment even when the overview is not in order", () => {
       const shuffled = { ...overview, assignments: [...overview.assignments].reverse() };
       expect(pageCandidates(shuffled, "r2").candidates.map((c) => c.path)).toEqual([
@@ -595,7 +606,15 @@ describe("mountOwner", () => {
     let assignments: OwnerAssignment[];
     let posts: Record<string, string>[];
     let failPaths: Set<string>;
+    /** When set, POSTs wait for it; `postStatus` overrides the POST reply; `overviewDown` fails the reload. */
+    let gate: Promise<void> | null;
+    let postStatus: number | null;
+    let overviewDown: boolean;
     beforeEach(() => {
+      gate = null;
+      postStatus = null;
+      overviewDown = false;
+      document.documentElement.classList.remove("ttf-lock");
       history.replaceState(null, "", "/o/#owner=tok");
       assignments = [
         a({ id: "p3", title: "Gallery", site: "greensprings", path: "/gallery", created_at: "2026-11-21T10:00:00.000Z" }),
@@ -611,12 +630,15 @@ describe("mountOwner", () => {
           if (path === "/api/owner/assignments" && init?.method === "POST") {
             const body = JSON.parse(String(init.body)) as Record<string, string>;
             posts.push(body);
+            if (gate) await gate;
+            if (postStatus) return new Response('{"error":"Unauthorized"}', { status: postStatus });
             if (failPaths.has(body.path)) return new Response('{"error":"Not found"}', { status: 404 });
             const r = body.reviewer_id === "r2" ? ben : { id: "r1", name: "Alexis Rivera" };
             assignments.unshift(a({ id: `new${++n}`, site: body.site, path: body.path, title: body.title, reviewer: r, created_at: `2026-11-22T00:00:0${n}.000Z` }));
             return new Response(JSON.stringify({ id: `new${n}` }), { status: 201 });
           }
           if (path.endsWith("/sites")) return new Response(JSON.stringify(SITES), { status: 200 });
+          if (overviewDown && posts.length) return new Response("{}", { status: 503 });
           return new Response(JSON.stringify({ reviewers: [ALEXIS, BEN], assignments }), { status: 200 });
         }),
       );
@@ -724,6 +746,74 @@ describe("mountOwner", () => {
       submit().click();
       await vi.waitFor(() => expect(panel()).toBeNull());
       expect(posts).toEqual([{ site: "greensprings", reviewer_id: "r1", path: "/faq", title: "FAQ" }]);
+    });
+    const locked = () => document.documentElement.classList.contains("ttf-lock");
+    it("the page behind is locked while the panel is open, and unlocked when a 401 mid-submit shows the token form", async () => {
+      await mountOwner(window);
+      openFor("r2");
+      expect(locked()).toBe(true);
+      postStatus = 401;
+      tick("/gallery");
+      submit().click();
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Paste your owner token"));
+      expect(locked()).toBe(false);
+    });
+    it("unlocks when the reload after a submit goes offline", async () => {
+      overviewDown = true;
+      await mountOwner(window);
+      openFor("r2");
+      tick("/gallery");
+      submit().click();
+      await vi.waitFor(() => expect(document.body.textContent).toContain("Can't reach the review service right now."));
+      expect(panel()).toBeNull();
+      expect(locked()).toBe(false);
+    });
+    it("a failure is scrolled into view and focused, so it is seen and announced", async () => {
+      failPaths.add("/gallery");
+      const seen: Element[] = [];
+      const spy = vi.spyOn(Element.prototype, "scrollIntoView").mockImplementation(function (this: Element) {
+        seen.push(this);
+      });
+      await mountOwner(window);
+      openFor("r2");
+      tick("/gallery");
+      submit().click();
+      await vi.waitFor(() => expect(panel()!.querySelector("[data-error]")?.textContent).toContain("Not found"));
+      const err = panel()!.querySelector("[data-error]")!;
+      expect(document.activeElement).toBe(err);
+      expect(err.getAttribute("tabindex")).toBe("-1");
+      expect(seen).toContain(err);
+      spy.mockRestore();
+    });
+    it("Escape, the X and the scrim do nothing while a submit is in flight", async () => {
+      failPaths.add("/gallery");
+      let open!: () => void;
+      gate = new Promise((res) => (open = res));
+      await mountOwner(window);
+      openFor("r2");
+      tick("/gallery");
+      submit().click();
+      await vi.waitFor(() => expect(posts).toHaveLength(1));
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      (panel()!.querySelector("[data-action=assign-close]") as HTMLButtonElement).click();
+      (panel()!.querySelector("[data-action=assign-scrim]") as HTMLElement).click();
+      expect(panel()).not.toBeNull();
+      open();
+      await vi.waitFor(() => expect(panel()!.querySelector("[data-error]")?.textContent).toContain("Not found"));
+    });
+    it("Enter in the Path or Title field submits", async () => {
+      await mountOwner(window);
+      openFor("r1");
+      (panel()!.querySelector("[data-action=assign-manual]") as HTMLButtonElement).click();
+      const m = panel()!.querySelector("[data-manual]")!;
+      for (const [name, v] of [["path", "/faq"], ["title", "FAQ"]]) {
+        const el = m.querySelector(`input[name=${name}]`) as HTMLInputElement;
+        el.value = v;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      }
+      (m.querySelector("input[name=title]") as HTMLInputElement).dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true }));
+      await vi.waitFor(() => expect(panel()).toBeNull());
+      expect(posts).toEqual([{ site: "bonus-decade", reviewer_id: "r1", path: "/faq", title: "FAQ" }]);
     });
     it("a page that isn't listed with no title says so and posts nothing", async () => {
       await mountOwner(window);

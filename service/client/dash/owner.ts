@@ -120,14 +120,26 @@ export function pageCandidates(overview: Overview, reviewerId: string): { candid
   const sorted = [...overview.assignments].sort((x, y) => (x.created_at < y.created_at ? 1 : x.created_at > y.created_at ? -1 : 0));
   const already = sorted.filter((x) => x.reviewer.id === reviewerId);
   const have = new Set(already.map((x) => pageKey(x.site, x.path)));
+  // A first name shared by two reviewers is ambiguous, so those reviewers go by their full names.
+  const people = new Map<string, string>();
+  for (const r of overview.reviewers) people.set(r.id, r.name);
+  for (const x of sorted) if (!people.has(x.reviewer.id)) people.set(x.reviewer.id, x.reviewer.name);
+  const firstCount = new Map<string, number>();
+  for (const n of people.values()) firstCount.set(firstName(n), (firstCount.get(firstName(n)) ?? 0) + 1);
+  const shown = (name: string) => ((firstCount.get(firstName(name)) ?? 0) > 1 ? name.trim() : firstName(name));
   const byKey = new Map<string, PageCandidate>();
+  const ids = new Map<string, Set<string>>();
   for (const x of sorted) {
     const key = pageKey(x.site, x.path);
     if (have.has(key)) continue;
-    const name = firstName(x.reviewer.name);
     const c = byKey.get(key);
+    const seen = ids.get(key) ?? new Set<string>();
+    ids.set(key, seen);
+    if (seen.has(x.reviewer.id)) continue;
+    seen.add(x.reviewer.id);
+    const name = shown(x.reviewer.name);
     if (!c) byKey.set(key, { site: x.site, path: x.path, title: x.title, lastAssignedTo: [name], lastAssignedAt: x.created_at });
-    else if (!c.lastAssignedTo.includes(name)) c.lastAssignedTo.push(name);
+    else c.lastAssignedTo.push(name);
   }
   return { candidates: [...byKey.values()], already };
 }
@@ -391,7 +403,7 @@ function assignPanelHtml(s: OwnerState, reviewerId: string, d: AssignDraft, now:
     `<div class="picks" data-picks>${picksHtml(s, reviewerId, d, now)}</div>` +
     (already.length ? `<p class="already">Already on ${first}'s list: ${already.map((x) => esc(x.title)).join(", ")}</p>` : "") +
     (d.manualOpen ? `<div class="panel-foot">${toggle}</div>${manual}` : "") +
-    (d.error ? `<p class="err" data-error role="alert">${esc(d.error)}</p>` : errLine()) +
+    (d.error ? `<p class="err" data-error role="alert" tabindex="-1">${esc(d.error)}</p>` : errLine()) +
     `<div class="panel-foot${d.manualOpen ? " end" : ""}">${d.manualOpen ? "" : toggle}${submit}</div>` +
     `</div></div>`
   );
@@ -743,8 +755,14 @@ export async function mountOwner(win: Window): Promise<void> {
   host.innerHTML = '<main aria-live="polite"></main>';
   const main = host.querySelector("main")!;
 
+  /** The page behind the assign panel must not scroll; every path that adds or removes the panel says so here. */
+  const setLock = (on: boolean) => {
+    doc.documentElement.classList.toggle("ttf-lock", on);
+  };
+
   const showTokenForm = () => {
     main.innerHTML = renderTokenForm();
+    setLock(false);
   };
 
   // Hash first (and remember it), then storage.
@@ -817,10 +835,14 @@ export async function mountOwner(win: Window): Promise<void> {
   main.addEventListener("change", panelInput);
 
   doc.addEventListener("keydown", (ev) => {
-    if (!state.assignFor) return;
+    if (!state.assignFor || !main.isConnected) return;
     const panel = main.querySelector("[data-assign-panel] [role=dialog]") as HTMLElement | null;
     if (!panel) return;
-    if (ev.key === "Escape") {
+    const t = ev.target as Element | null;
+    if (ev.key === "Enter" && t?.matches?.("[data-manual] input")) {
+      ev.preventDefault();
+      void submitAssign();
+    } else if (ev.key === "Escape") {
       ev.preventDefault();
       closeAssign();
     } else if (ev.key === "Tab") {
@@ -856,6 +878,8 @@ export async function mountOwner(win: Window): Promise<void> {
   }
 
   function closeAssign(): void {
+    // Mid-submit, the outcome still has to land somewhere it can be seen.
+    if (state.assign?.busy) return;
     const opener = state.assign?.opener;
     state.assignFor = null;
     state.assign = null;
@@ -909,7 +933,13 @@ export async function mountOwner(win: Window): Promise<void> {
       return;
     }
     d.error = failures.join("\n");
-    await refresh();
+    if (!(await refresh())) return;
+    // The re-render reset the panel's scroll and focus; bring the error into view and announce it.
+    const err = main.querySelector("[data-assign-panel] [data-error]") as HTMLElement | null;
+    if (err) {
+      err.scrollIntoView({ block: "center" });
+      err.focus();
+    }
   }
 
   if (!token) {
@@ -929,7 +959,7 @@ export async function mountOwner(win: Window): Promise<void> {
 
   const render = () => {
     main.innerHTML = renderOwner(state);
-    doc.documentElement.classList.toggle("ttf-lock", state.assignFor !== null);
+    setLock(main.querySelector("[data-assign-panel]") !== null);
   };
 
   /** Fetches everything; false when the token was refused (the token form is showing). */
@@ -943,6 +973,7 @@ export async function mountOwner(win: Window): Promise<void> {
     }
     if (!ov.ok || !sites.ok) {
       main.innerHTML = `<p class="notice">${MSG_OFFLINE}</p><button type="button" class="btn" data-action="retry">Try again</button>`;
+      setLock(false);
       return false;
     }
     state.overview = ov.data;
@@ -1021,6 +1052,7 @@ export async function mountOwner(win: Window): Promise<void> {
       await downloadBatch(el, id, el.getAttribute("data-site") ?? "");
     } else if (action === "retry") {
       main.innerHTML = '<p class="notice muted">Loading…</p>';
+      setLock(false);
       await refresh();
     } else if (action === "assign" && reviewer) {
       state.assignFor = id;
