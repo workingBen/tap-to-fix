@@ -13,19 +13,35 @@ export type OwnerAssignment = {
   site: string;
   path: string;
   title: string;
+  created_at: string;
   reviewer: { id: string; name: string };
   status: AssignmentStatus;
   counts: { open: number; in_progress: number; settled: number };
   pr_urls: string[];
 };
 export type Overview = { reviewers: OwnerReviewer[]; assignments: OwnerAssignment[] };
-export type Flash = { kind: "link"; name: string; url: string };
+export type Flash = { kind: "link"; id: string; name: string; url: string };
+/** What the Assign pages panel holds while it is open; kept across re-renders. */
+export type AssignDraft = {
+  /** The reviewer whose column button opened the panel; focus goes back there on close. */
+  opener: string;
+  /** Ticked pages, as pageKey(site, path). */
+  picked: string[];
+  query: string;
+  manualOpen: boolean;
+  manual: { site: string; path: string; title: string };
+  error: string | null;
+  busy: boolean;
+};
 export type OwnerState = {
   sites: Site[];
   overview: Overview;
-  selectedReviewerId: string | null;
+  /** The reviewer the assign panel is open for (its "To" choice); null when it is closed. */
+  assignFor: string | null;
+  assign?: AssignDraft | null;
   flash: Flash | null;
 };
+export type PageCandidate = { site: string; path: string; title: string; lastAssignedTo: string[]; lastAssignedAt: string };
 export type ReadyBatch = { reviewerId: string; reviewerName: string; siteSlug: string; siteName: string; open: number; command: string };
 
 export const STORAGE_KEY = "ttf:owner-token";
@@ -93,6 +109,72 @@ export function readyBatches(overview: Overview, sites: Site[] = []): ReadyBatch
   );
 }
 
+/**
+ * How a reviewer is named in the assign controls: the first name, or the full name when another
+ * reviewer shares that first name (two Alexiss must not look identical).
+ */
+export function reviewerLabel(reviewers: { name: string }[], name: string): string {
+  const first = firstName(name);
+  return reviewers.filter((r) => firstName(r.name) === first).length > 1 ? name.trim() : first;
+}
+
+/** One page across reviewers. Slugs never hold "|", so the first one splits it. */
+export const pageKey = (site: string, path: string) => `${site}|${path}`;
+
+/**
+ * Every page in use, once each, for assigning to `reviewerId`: the pages that reviewer lacks,
+ * most recently assigned first, and the reviewer's own assignments (newest first) as `already`.
+ */
+export function pageCandidates(overview: Overview, reviewerId: string): { candidates: PageCandidate[]; already: OwnerAssignment[] } {
+  const sorted = [...overview.assignments].sort((x, y) => (x.created_at < y.created_at ? 1 : x.created_at > y.created_at ? -1 : 0));
+  const already = sorted.filter((x) => x.reviewer.id === reviewerId);
+  const have = new Set(already.map((x) => pageKey(x.site, x.path)));
+  // A first name shared by two reviewers is ambiguous, so those reviewers go by their full names.
+  const people = new Map<string, { name: string }>();
+  for (const r of overview.reviewers) people.set(r.id, r);
+  for (const x of sorted) if (!people.has(x.reviewer.id)) people.set(x.reviewer.id, x.reviewer);
+  const everyone = [...people.values()];
+  const shown = (name: string) => reviewerLabel(everyone, name);
+  const byKey = new Map<string, PageCandidate>();
+  const ids = new Map<string, Set<string>>();
+  for (const x of sorted) {
+    const key = pageKey(x.site, x.path);
+    if (have.has(key)) continue;
+    const c = byKey.get(key);
+    const seen = ids.get(key) ?? new Set<string>();
+    ids.set(key, seen);
+    if (seen.has(x.reviewer.id)) continue;
+    seen.add(x.reviewer.id);
+    const name = shown(x.reviewer.name);
+    if (!c) byKey.set(key, { site: x.site, path: x.path, title: x.title, lastAssignedTo: [name], lastAssignedAt: x.created_at });
+    else c.lastAssignedTo.push(name);
+  }
+  return { candidates: [...byKey.values()], already };
+}
+
+/** Case-insensitive match on the title, the path and the site's name. */
+export function filterCandidates(list: PageCandidate[], query: string, sites: Site[]): PageCandidate[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return list;
+  const names = new Map(sites.map((s) => [s.slug, s.name]));
+  return list.filter((c) => [c.title, c.path, names.get(c.site) ?? c.site].some((t) => t.toLowerCase().includes(q)));
+}
+
+/** "today", "yesterday" or "N days ago", counted in local calendar days. */
+export function relativeDay(iso: string, now: Date): string {
+  const d = new Date(iso);
+  const day = (x: Date) => new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+  const n = Math.round((day(now) - day(d)) / 86_400_000);
+  if (n <= 0) return "today";
+  if (n === 1) return "yesterday";
+  return `${n} days ago`;
+}
+
+/** "Ben", "Ben and Alexis", "Ben, Alexis and Shawn". */
+function listNames(names: string[]): string {
+  return names.length <= 1 ? (names[0] ?? "") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+}
+
 // confirm() copy is the contract: name the reviewer every time, no pronouns.
 export const reissueConfirm = (name: string) => {
   const n = firstName(name);
@@ -124,7 +206,11 @@ const CLOSE = svg('<path d="M6 6l12 12M18 6L6 18"/>');
 const COPY = svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>', 18);
 const DOWNLOAD = svg('<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>', 18);
 const OUT = svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>', 17);
+const LINK = svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>', 18);
+const MORE = svg('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>');
 const PR = svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4M13 3.5L10.5 6 13 8.5"/>', 17);
+const SEARCH = svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>');
+const CHECK = svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 16).replace('stroke-width="2"', 'stroke-width="3"');
 
 const copyButton = (text: string) =>
   `<button type="button" class="btn quiet copy" data-copy="${esc(text)}">${COPY}<span>Copy</span></button>`;
@@ -141,37 +227,36 @@ function adder(form: string, label: string, body: string, open: boolean): string
   );
 }
 
-/** First name, or the full name when another reviewer shares it. */
-function headingName(b: ReadyBatch, all: { id: string; name: string }[]): string {
-  const first = firstName(b.reviewerName).toLowerCase();
-  const shared = all.some((x) => x.id !== b.reviewerId && firstName(x.name).toLowerCase() === first);
-  return shared ? b.reviewerName.trim() : firstName(b.reviewerName);
+/** The comment counts for one page: the open count in bold, zeros left out. */
+export function countsText(a: OwnerAssignment): string {
+  const { open, in_progress, settled } = a.counts;
+  const parts = [open ? `<b>${open} open</b>` : "", in_progress ? `${in_progress} in progress` : "", settled ? `${settled} settled` : ""];
+  return parts.filter(Boolean).join(" · ") || "No comments yet";
 }
 
-function readyHtml(batches: ReadyBatch[], reviewers: { id: string; name: string }[]): string {
-  if (batches.length === 0) return "";
+/** The origin without its scheme ("https://greensprings.life" → "greensprings.life"). */
+function hostOf(origin: string): string {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return origin.replace(/^[a-z]+:\/\//i, "");
+  }
+}
+
+function initial(name: string): string {
+  return esc(firstName(name).slice(0, 1).toUpperCase()) || "?";
+}
+
+function commandHtml(command: string): string {
   return (
-    `<section class="ready-wrap" aria-label="Ready for a review cycle">` +
-    batches
-      .map(
-        (b) =>
-          `<div class="ready" data-ready>` +
-          `<p class="ready-h">${esc(headingName(b, reviewers))} has ${plural(b.open, "comment", "comments")} ready for a review cycle on ${esc(b.siteName)}</p>` +
-          `<div class="cmd"><code>${b.command
-            .split(" ")
-            .map((t) => `<span class="tok">${esc(t)}</span>`)
-            .join(" ")}</code>${copyButton(b.command)}</div>` +
-          `<div class="dl"><button type="button" class="btn quiet" data-action="download-batch" data-id="${esc(b.reviewerId)}" data-site="${esc(b.siteSlug)}">${DOWNLOAD}<span>Download batch file</span></button>` +
-          `<span class="dl-s">For when the network is blocked: ttf batch --from reads it.</span>${errLine()}</div>` +
-          `</div>`,
-      )
-      .join("") +
-    `</section>`
+    `<div class="cmd"><code>${command
+      .split(" ")
+      .map((t) => `<span class="tok">${esc(t)}</span>`)
+      .join(" ")}</code>${copyButton(command)}</div>`
   );
 }
 
-function flashHtml(f: Flash | null): string {
-  if (!f) return "";
+function flashHtml(f: Flash): string {
   const n = esc(firstName(f.name));
   return (
     `<div class="flash" data-flash role="status">` +
@@ -183,62 +268,27 @@ function flashHtml(f: Flash | null): string {
   );
 }
 
-function reviewersHtml(s: OwnerState): string {
-  const { reviewers } = s.overview;
-  const items = reviewers
-    .map((r) => {
-      const sel = r.id === s.selectedReviewerId;
-      const meta = [`${r.ready_count} open`, r.revoked ? `<span class="off">Link off</span>` : ""].filter(Boolean).join(" · ");
-      const controls = sel
-        ? `<div class="rv-actions">` +
-          `<button type="button" class="btn quiet" data-action="reissue" data-id="${esc(r.id)}">New link</button>` +
-          (r.revoked ? "" : `<button type="button" class="btn quiet" data-action="revoke" data-id="${esc(r.id)}">Turn off link</button>`) +
-          `</div>`
-        : "";
-      return (
-        `<li class="rv-item${sel ? " sel" : ""}">` +
-        `<button type="button" class="rv" data-action="select" data-id="${esc(r.id)}" aria-pressed="${sel}">` +
-        `<span class="av" aria-hidden="true">${esc(firstName(r.name).slice(0, 1).toUpperCase()) || "?"}</span>` +
-        `<span class="rv-n">${esc(r.name)}</span>` +
-        `<span class="rv-c">${meta}</span>` +
-        `</button>` +
-        controls +
-        `</li>`
-      );
-    })
-    .join("");
-  const form = field("Name", "name", 'placeholder="Alexis"') + `<button type="submit" class="btn">Add</button>`;
+function menuHtml(r: OwnerReviewer, batches: ReadyBatch[]): string {
+  const items =
+    (r.revoked ? "" : `<button type="button" class="mi" data-action="revoke" data-id="${esc(r.id)}">Turn off link</button>`) +
+    batches
+      .map((b) => {
+        const label = `Download batch file for ${b.siteName}`;
+        return (
+          `<div class="dl"><button type="button" class="mi" data-action="download-batch" data-id="${esc(r.id)}" data-site="${esc(b.siteSlug)}" data-label="${esc(label)}">` +
+          `${DOWNLOAD}<span>${esc(label)}</span></button>` +
+          `<p class="dl-s">For when the network is blocked: ttf batch --from reads it.</p>${errLine()}</div>`
+        );
+      })
+      .join("");
+  if (!items) return "";
   return (
-    `<section class="side" aria-labelledby="h-reviewers">` +
-    `<h2 class="lbl" id="h-reviewers">Reviewers</h2>` +
-    (items ? `<ul class="rv-list">${items}</ul>` : "") +
-    flashHtml(s.flash) +
-    adder("reviewer", reviewers.length ? "Add a reviewer" : "Add your first reviewer", form, reviewers.length === 0) +
-    `</section>`
+    `<details class="more"><summary class="ico" aria-label="${esc(`More for ${firstName(r.name)}`)}" title="More">${MORE}</summary>` +
+    `<div class="menu">${items}</div></details>`
   );
 }
 
-function assignHtml(s: OwnerState): string {
-  if (s.sites.length === 0) return `<p class="empty">Add a site first. The form is under Sites, below.</p>`;
-  if (s.overview.reviewers.length === 0) return `<p class="empty">Add a reviewer first, then assign pages here.</p>`;
-  const siteOpts = s.sites.map((x) => `<option value="${esc(x.slug)}">${esc(x.name)}</option>`).join("");
-  const revOpts = s.overview.reviewers
-    .map(
-      (r) =>
-        `<option value="${esc(r.id)}"${r.id === s.selectedReviewerId ? " selected" : ""}>${esc(r.name)}${r.revoked ? " (link off)" : ""}</option>`,
-    )
-    .join("");
-  const body =
-    `<div class="grid">` +
-    `<label class="fld"><span>Site</span><select name="site">${siteOpts}</select></label>` +
-    `<label class="fld"><span>Reviewer</span><select name="reviewer_id">${revOpts}</select></label>` +
-    field("Path", "path", 'placeholder="/digital-detox" autocapitalize="off" spellcheck="false"') +
-    field("Title", "title", 'placeholder="Digital Detox"') +
-    `</div><button type="submit" class="btn">Assign</button>`;
-  return adder("assign", "Assign a page", body, false);
-}
-
-function rowHtml(a: OwnerAssignment, site: Site | undefined): string {
+function pageHtml(a: OwnerAssignment, site: Site | undefined): string {
   const links =
     (site
       ? `<a class="lnk" href="${esc(site.origin + a.path)}" target="_blank" rel="noopener noreferrer">${OUT}<span>Page</span></a>`
@@ -252,43 +302,172 @@ function rowHtml(a: OwnerAssignment, site: Site | undefined): string {
       .join("");
   const label = `Remove ${a.title} from ${firstName(a.reviewer.name)}'s list`;
   return (
-    `<tr data-row="${esc(a.id)}">` +
-    `<td class="c-page"><span class="tt">${esc(a.title)}</span><span class="tu">${esc(site ? site.name + " " : "")}<span class="path">${esc(a.path)}</span></span></td>` +
-    `<td class="c-rev">${esc(a.reviewer.name)}</td>` +
-    `<td class="c-st"><span class="st ${a.status}">${STATUS_LABEL[a.status]}</span></td>` +
-    `<td class="c-links">${links}</td>` +
-    `<td class="c-rm"><button type="button" class="rm" data-action="remove" data-id="${esc(a.id)}" aria-label="${esc(label)}" title="Remove">${CLOSE}</button></td>` +
-    `</tr>`
+    `<li class="pg" data-row="${esc(a.id)}"><div class="grow">` +
+    `<p class="tt">${esc(a.title)}</p>` +
+    `<p class="tu">${esc(site ? site.name + " " : "")}<span class="mono">${esc(a.path)}</span></p>` +
+    `<div class="meta"><span class="st ${a.status}">${STATUS_LABEL[a.status]}</span><span class="counts">${countsText(a)}</span>${links}</div>` +
+    `</div><button type="button" class="rm" data-action="remove" data-id="${esc(a.id)}" aria-label="${esc(label)}" title="Remove">${CLOSE}</button></li>`
   );
 }
 
-function pagesHtml(s: OwnerState): string {
-  const sel = s.overview.reviewers.find((r) => r.id === s.selectedReviewerId) ?? null;
-  const rows = s.overview.assignments.filter((a) => !sel || a.reviewer.id === sel.id);
-  const sites = new Map(s.sites.map((x) => [x.slug, x]));
-  const heading = sel ? `${esc(firstName(sel.name))}'s pages` : "Pages";
-  const empty = sel ? `No pages for ${esc(firstName(sel.name))} yet.` : "No pages assigned yet.";
-  const table = rows.length
-    ? `<table class="pages"><thead><tr><th>Page</th><th>Reviewer</th><th>Status</th><th>Links</th><th><span class="sr">Remove</span></th></tr></thead>` +
-      `<tbody>${rows.map((a) => rowHtml(a, sites.get(a.site))).join("")}</tbody></table>`
-    : `<p class="empty">${empty}</p>`;
+// ---- Assign pages panel ----
+
+export const emptyDraft = (opener: string): AssignDraft => ({
+  opener,
+  picked: [],
+  query: "",
+  manualOpen: false,
+  manual: { site: "", path: "", title: "" },
+  error: null,
+  busy: false,
+});
+
+export const MSG_MANUAL_INCOMPLETE = "Fill in the Path and the Title for the page that isn't listed.";
+
+/** The page that isn't listed counts once anything is typed into it. */
+export const manualStarted = (d: AssignDraft) => d.manualOpen && (d.manual.path.trim() !== "" || d.manual.title.trim() !== "");
+
+/** Ticked pages the reviewer does not already have, in the list's order (newest first). */
+export function pickedCandidates(overview: Overview, reviewerId: string, d: AssignDraft): PageCandidate[] {
+  const picked = new Set(d.picked);
+  return pageCandidates(overview, reviewerId).candidates.filter((c) => picked.has(pageKey(c.site, c.path)));
+}
+
+export function assignCount(overview: Overview, reviewerId: string, d: AssignDraft): number {
+  return pickedCandidates(overview, reviewerId, d).length + (manualStarted(d) ? 1 : 0);
+}
+
+export function assignLabel(n: number, label: string): string {
+  return n ? `Assign ${plural(n, "page", "pages")} to ${label}` : `Assign pages to ${label}`;
+}
+
+/** The checklist rows for the current search; ticks are read from the draft. */
+export function picksHtml(s: OwnerState, reviewerId: string, d: AssignDraft, now: Date = new Date()): string {
+  const reviewer = s.overview.reviewers.find((r) => r.id === reviewerId);
+  const { candidates, already } = pageCandidates(s.overview, reviewerId);
+  const shown = filterCandidates(candidates, d.query, s.sites);
+  const names = new Map(s.sites.map((x) => [x.slug, x.name]));
+  const picked = new Set(d.picked);
+  if (!shown.length) {
+    const why = d.query.trim()
+      ? `No pages match “${esc(d.query.trim())}”.`
+      : candidates.length === 0 && already.length > 0
+        ? `Every page in use is already on ${esc(reviewerLabel(s.overview.reviewers, reviewer?.name ?? ""))}'s list.`
+        : "No pages yet. Add one with A page that isn't listed, below.";
+    return `<p class="picks-none">${why}</p>`;
+  }
+  return shown
+    .map((c) => {
+      const key = pageKey(c.site, c.path);
+      return (
+        `<label class="pick"><input type="checkbox" class="cb" data-key="${esc(key)}"${picked.has(key) ? " checked" : ""}>` +
+        `<span class="box" aria-hidden="true">${CHECK}</span><span class="grow">` +
+        `<span class="tt">${esc(c.title)}</span>` +
+        `<span class="tu">${esc(names.get(c.site) ?? c.site)} <span class="mono">${esc(c.path)}</span></span>` +
+        `<span class="tu">Assigned to ${esc(listNames(c.lastAssignedTo))} · ${relativeDay(c.lastAssignedAt, now)}</span>` +
+        `</span></label>`
+      );
+    })
+    .join("");
+}
+
+function assignPanelHtml(s: OwnerState, reviewerId: string, d: AssignDraft, now: Date): string {
+  const reviewer = s.overview.reviewers.find((r) => r.id === reviewerId);
+  if (!reviewer) return "";
+  const label = reviewerLabel(s.overview.reviewers, reviewer.name);
+  const first = esc(label);
+  const { already } = pageCandidates(s.overview, reviewerId);
+  const seg = s.overview.reviewers
+    .map(
+      (r) =>
+        `<button type="button" data-action="assign-to" data-id="${esc(r.id)}" aria-pressed="${r.id === reviewerId}">${esc(reviewerLabel(s.overview.reviewers, r.name))}</button>`,
+    )
+    .join("");
+  const n = assignCount(s.overview, reviewerId, d);
+  const submit = `<button type="button" class="btn" data-action="assign-submit"${n === 0 || d.busy ? " disabled" : ""}>${esc(assignLabel(n, label))}</button>`;
+  const toggle =
+    `<button type="button" class="btn quiet" data-action="assign-manual" aria-expanded="${d.manualOpen}">` +
+    `${PLUS}<span>A page that isn't listed</span></button>`;
+  const site = d.manual.site || s.sites[0]?.slug || "";
+  const siteOpts = s.sites
+    .map((x) => `<option value="${esc(x.slug)}"${x.slug === site ? " selected" : ""}>${esc(x.name)}</option>`)
+    .join("");
+  const manual = d.manualOpen
+    ? `<div class="manual" data-manual><div class="grid">` +
+      `<label class="fld"><span>Site</span><select name="site">${siteOpts}</select></label>` +
+      field("Path", "path", `placeholder="/digital-detox" autocapitalize="off" spellcheck="false" value="${esc(d.manual.path)}"`) +
+      field("Title", "title", `placeholder="Digital Detox" value="${esc(d.manual.title)}"`) +
+      `</div></div>`
+    : "";
   return (
-    `<section class="pages-sec" aria-labelledby="h-pages">` +
-    `<div class="topline"><h2 class="h" id="h-pages">${heading}</h2>` +
-    (sel ? `<button type="button" class="btn quiet" data-action="select" data-id="">Show everyone</button>` : "") +
-    `</div>` +
-    assignHtml(s) +
-    table +
+    `<div class="assign-layer" data-assign-panel>` +
+    `<div class="scrim" data-action="assign-scrim"></div>` +
+    `<div class="panel" role="dialog" aria-modal="true" aria-labelledby="assign-h">` +
+    `<div class="panel-h"><h2 class="h2" id="assign-h" tabindex="-1">Assign pages</h2>` +
+    `<button type="button" class="ico" data-action="assign-close" aria-label="Close" title="Close">${CLOSE}</button></div>` +
+    `<fieldset class="pbody" data-assign-body${d.busy ? " disabled" : ""}>` +
+    `<p class="lbl" id="assign-to">To</p><div class="seg" role="group" aria-labelledby="assign-to">${seg}</div>` +
+    `<label class="field">${SEARCH}<input type="search" data-assign-search aria-label="Find a page" placeholder="Find a page" autocomplete="off" value="${esc(d.query)}"></label>` +
+    `<p class="sub-h">Most recently assigned</p>` +
+    `<div class="picks" data-picks>${picksHtml(s, reviewerId, d, now)}</div>` +
+    (already.length ? `<p class="already">Already on ${first}'s list: ${already.map((x) => esc(x.title)).join(", ")}</p>` : "") +
+    (d.manualOpen ? `<div class="panel-foot">${toggle}</div>${manual}` : "") +
+    (d.error ? `<p class="err" data-error role="alert" tabindex="-1">${esc(d.error)}</p>` : errLine()) +
+    `<div class="panel-foot${d.manualOpen ? " end" : ""}">${d.manualOpen ? "" : toggle}${submit}</div>` +
+    `</fieldset></div></div>`
+  );
+}
+
+/** "5 open · 1 in progress", in the page rows' words; "No comments yet" when the reviewer has none. */
+function subCounts(r: OwnerReviewer, mine: OwnerAssignment[]): string {
+  let inProgress = 0;
+  let total = 0;
+  for (const a of mine) {
+    inProgress += a.counts.in_progress;
+    total += a.counts.open + a.counts.in_progress + a.counts.settled;
+  }
+  if (total === 0 && r.ready_count === 0) return "No comments yet";
+  return `${r.ready_count} open` + (inProgress > 0 ? ` · ${inProgress} in progress` : "");
+}
+
+function personHtml(s: OwnerState, r: OwnerReviewer, batches: ReadyBatch[]): string {
+  const sites = new Map(s.sites.map((x) => [x.slug, x]));
+  const mine = s.overview.assignments.filter((a) => a.reviewer.id === r.id);
+  const first = esc(firstName(r.name));
+  const sub = `${subCounts(r, mine)} · ${r.revoked ? `<span class="off">Link off</span>` : "link on"}`;
+  const ready = batches
+    .map((b) => `<div class="ready" data-ready><p>${plural(b.open, "comment", "comments")} ready to fix on ${esc(b.siteName)}</p>${commandHtml(b.command)}</div>`)
+    .join("");
+  const pages = mine.length
+    ? `<ul class="pgs">${mine.map((a) => pageHtml(a, sites.get(a.site))).join("")}</ul>`
+    : `<p class="none">No pages for ${first} yet.</p>`;
+  const add =
+    s.sites.length === 0
+      ? ""
+      : `<div class="add"><button type="button" class="btn quiet" data-action="assign" data-id="${esc(r.id)}">${PLUS}<span>Assign a page to ${esc(reviewerLabel(s.overview.reviewers, r.name))}</span></button></div>`;
+  return (
+    `<section class="person" data-person="${esc(r.id)}" aria-labelledby="p-${esc(r.id)}">` +
+    `<div class="person-h"><span class="av" aria-hidden="true">${initial(r.name)}</span>` +
+    `<div class="grow"><h2 class="pname" id="p-${esc(r.id)}">${esc(r.name)}</h2><p class="tu">${sub}</p></div>` +
+    `<div class="ctl"><button type="button" class="btn quiet" data-action="reissue" data-id="${esc(r.id)}">${LINK}<span>New link</span></button>` +
+    menuHtml(r, batches) +
+    `</div></div><div class="person-err"></div>` +
+    (s.flash && s.flash.id === r.id ? flashHtml(s.flash) : "") +
+    ready +
+    pages +
+    add +
     `</section>`
   );
 }
 
 function sitesHtml(s: OwnerState): string {
+  const count = new Map<string, number>();
+  for (const a of s.overview.assignments) count.set(a.site, (count.get(a.site) ?? 0) + 1);
   const list = s.sites
     .map(
       (x) =>
-        `<li class="site-row"><span class="tt">${esc(x.name)}</span>` +
-        `<span class="tu"><span class="part">${esc(x.origin)}</span> · <span class="part">${esc(x.repo)}</span> · <span class="part">slug <code>${esc(x.slug)}</code></span></span></li>`,
+        `<li class="siterow"><b>${esc(x.name)}</b><span class="tu">${esc(hostOf(x.origin))} · ${plural(count.get(x.slug) ?? 0, "page", "pages")}</span>` +
+        `<span class="tu more-line">slug <code>${esc(x.slug)}</code> · ${esc(x.repo)}</span></li>`,
     )
     .join("");
   const body =
@@ -299,23 +478,31 @@ function sitesHtml(s: OwnerState): string {
     field("Repo", "repo", 'placeholder="workingBen/longevity-tracker" autocapitalize="off" spellcheck="false"') +
     `</div><button type="submit" class="btn">Add site</button>`;
   return (
-    `<section class="sites-sec" aria-labelledby="h-sites">` +
-    `<h2 class="h" id="h-sites">Sites</h2>` +
-    (list ? `<ul class="site-list">${list}</ul>` : "") +
-    adder("site", "Add a site", body, s.sites.length === 0) +
+    `<section class="sites" aria-labelledby="h-sites">` +
+    `<div class="sec-h"><h2 class="h2" id="h-sites">Sites</h2>${adder("site", "Add a site", body, s.sites.length === 0)}</div>` +
+    (list ? `<ul class="rule" data-sites>${list}</ul>` : "") +
     `</section>`
   );
 }
 
-export function renderOwner(state: OwnerState): string {
+export function renderOwner(state: OwnerState, now: Date = new Date()): string {
+  const { reviewers } = state.overview;
+  const batches = readyBatches(state.overview, state.sites);
+  const form = field("Name", "name", 'placeholder="Alexis"') + `<button type="submit" class="btn">Add</button>`;
   return (
     `<h1 class="sr">tap-to-fix owner dashboard</h1>` +
-    `<div class="owner">` +
-    `<div class="a-ready">${readyHtml(readyBatches(state.overview, state.sites), state.overview.reviewers)}</div>` +
-    `<div class="a-side">${reviewersHtml(state)}</div>` +
-    `<div class="a-pages">${pagesHtml(state)}</div>` +
-    `<div class="a-sites">${sitesHtml(state)}</div>` +
-    `</div>`
+    `<div class="top"><p class="brand">tap-to-fix</p>` +
+    adder("reviewer", reviewers.length ? "Add a reviewer" : "Add your first reviewer", form, reviewers.length === 0) +
+    `</div>` +
+    (state.flash && !reviewers.some((r) => r.id === state.flash!.id) ? flashHtml(state.flash) : "") +
+    (state.sites.length === 0 ? `<p class="empty">Add a site first. The form is under Sites, below.</p>` : "") +
+    (reviewers.length
+      ? `<div class="people">${reviewers.map((r) => personHtml(state, r, batches.filter((b) => b.reviewerId === r.id))).join("")}</div>`
+      : "") +
+    sitesHtml(state) +
+    (state.assignFor && state.sites.length
+      ? assignPanelHtml(state, state.assignFor, state.assign ?? emptyDraft(state.assignFor), now)
+      : "")
   );
 }
 
@@ -330,74 +517,45 @@ export function renderTokenForm(): string {
 }
 
 export const OWNER_CSS = `
-main { max-width: 1240px; padding-top: 28px; }
+main { max-width: 1240px; padding-top: 22px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.owner { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "ready" "side" "pages" "sites"; row-gap: 36px; }
-.a-ready { grid-area: ready; } .a-side { grid-area: side; } .a-pages { grid-area: pages; } .a-sites { grid-area: sites; }
-.a-ready:empty { display: none; }
-.h { font: 600 26px/1.2 var(--hf); margin: 0; letter-spacing: -0.01em; }
-.lbl { font-size: 17px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--mut); margin: 0 0 8px; }
-.empty { font: 400 19px/1.45 var(--hf); color: var(--mut); margin: 16px 0 0; }
-.tt { font: 600 19px/1.3 var(--hf); overflow-wrap: anywhere; }
-.tu { font-size: 17px; line-height: 1.4; color: var(--mut); overflow-wrap: anywhere; }
-.path, code { font-family: ui-monospace, Menlo, monospace; font-size: 17px; }
-.part { white-space: nowrap; }
+p, h2 { margin: 0; }
 button { font: inherit; color: inherit; }
+.h { font: 600 26px/1.2 var(--hf); margin: 0; letter-spacing: -0.01em; }
+.h2 { font: 600 24px/1.2 var(--hf); }
+.empty { font: 400 19px/1.45 var(--hf); color: var(--mut); margin: 22px 0 0; }
+.tt { font: 600 19px/1.3 var(--hf); overflow-wrap: anywhere; }
+.tu { font-size: 16px; line-height: 1.4; color: var(--mut); overflow-wrap: anywhere; }
+.mono, code { font-family: ui-monospace, Menlo, monospace; font-size: 16px; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.off { color: var(--warn); font-weight: 600; }
 
 .btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 0 20px;
-  border: 0; border-radius: 999px; background: var(--acc); color: var(--acc-ink); font-size: 17px; font-weight: 600; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 0 18px;
+  border: 0; border-radius: 999px; background: var(--acc); color: var(--acc-ink); font-size: 17px; font-weight: 600; cursor: pointer; white-space: nowrap;
 }
-.btn.quiet { background: transparent; color: var(--acc); padding: 0 12px; }
-.btn.quiet:hover { background: var(--soft); }
-.btn:focus-visible, .rv:focus-visible, .rm:focus-visible, .lnk:focus-visible, summary:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
+.btn.quiet { background: transparent; color: var(--acc); padding: 0 10px; }
+@media (hover: hover) { .btn.quiet:hover { background: var(--soft); } }
+.ico { display: inline-grid; place-items: center; width: 44px; height: 44px; color: var(--mut); border-radius: 50%; cursor: pointer; }
+.ico:hover { background: var(--soft); color: var(--ink); }
+.btn:focus-visible, .rm:focus-visible, .lnk:focus-visible, .mi:focus-visible, summary:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
 
-/* the one highlighted box */
-.ready-wrap { display: flex; flex-direction: column; gap: 12px; }
-.ready { background: var(--soft); border-radius: var(--r); padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
-.ready-h { margin: 0; font: 600 20px/1.35 var(--hf); }
-.cmd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.cmd code, .flash-url {
-  font-size: 17px; font-weight: 600; background: var(--surf); border: 1px solid var(--line); border-radius: 8px;
-  padding: 10px 12px; overflow-wrap: break-word; min-width: 0; user-select: all;
-}
-.cmd code { flex: 1 1 auto; overflow-wrap: normal; overflow-x: auto; }
-.dl { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; margin-left: -12px; }
-.dl-s { font-size: 17px; color: var(--mut); }
-.dl .err { flex-basis: 100%; margin-left: 12px; }
-.cmd .tok { white-space: nowrap; hyphens: none; }
+/* top bar */
+.top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.brand { font: 600 24px/1.2 var(--hf); }
 
-/* reviewers */
-.rv-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
-.rv-item { border-bottom: 1px solid var(--line); }
-.rv {
-  display: grid; grid-template-columns: 34px minmax(0, 1fr); grid-template-areas: "av n" "av c"; column-gap: 12px; align-items: center;
-  width: 100%; min-height: 64px; padding: 10px 8px; border: 0; background: none; text-align: left; cursor: pointer; border-radius: 10px;
-}
-.rv:hover { background: var(--surf); }
-.rv-item.sel .rv { background: var(--soft); }
-.av { grid-area: av; width: 34px; height: 34px; border-radius: 50%; background: var(--ink); color: var(--bg); display: grid; place-items: center; font-weight: 700; font-size: 17px; }
-.rv-item.sel .av { background: var(--acc); color: var(--acc-ink); }
-.rv-n { grid-area: n; font-weight: 600; font-size: 18px; overflow-wrap: anywhere; }
-.rv-c { grid-area: c; font-size: 17px; color: var(--mut); }
-.off { color: var(--warn); font-weight: 600; }
-.rv-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 0 10px 46px; }
-.rv-actions .err, .c-page .err { flex-basis: 100%; margin-top: 4px; }
-.flash { margin-top: 16px; padding: 16px 0 4px; border-top: 2px solid var(--acc); }
-.flash-h { margin: 0; font: 600 20px/1.3 var(--hf); }
-.flash-s { margin: 4px 0 10px; font-size: 17px; color: var(--mut); }
-.flash-url { display: block; }
-.flash-row { display: flex; gap: 4px; margin-top: 8px; margin-left: -12px; }
-
-/* inline forms */
-.adder { margin-top: 12px; }
+/* inline forms (Add a reviewer, Add a site): the toggle sits at the right, the form opens full width under it */
+.adder { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; }
+.adder[open] { flex-basis: 100%; }
 .adder > summary {
-  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: var(--acc); font-weight: 600; font-size: 17px;
-  cursor: pointer; list-style: none; border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 18px; border-radius: 999px;
+  color: var(--acc); font-weight: 600; font-size: 17px; cursor: pointer; list-style: none; white-space: nowrap;
 }
+.top .adder > summary { background: var(--surf); border: 1.5px solid var(--line); }
+.sites .adder > summary { padding: 0 10px; }
+.adder > summary:hover { background: var(--soft); }
 .adder > summary::-webkit-details-marker { display: none; }
-.adder[open] > summary { margin-bottom: 6px; }
-.adder form { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; padding: 4px 0 8px; }
+.adder form { align-self: stretch; display: flex; flex-direction: column; align-items: flex-start; gap: 14px; padding: 14px 0 8px; }
 .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; width: 100%; }
 .fld { display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0; }
 .fld > span { font-size: 17px; font-weight: 600; color: var(--mut); }
@@ -409,81 +567,150 @@ button { font: inherit; color: inherit; }
 .err { margin: 0; color: var(--warn); background: var(--warn-bg); border-radius: 8px; padding: 8px 12px; font-size: 17px; }
 .err[hidden] { display: none; }
 
-/* pages */
-.topline { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.pages { width: 100%; border-collapse: collapse; margin-top: 12px; }
-.pages thead { display: none; }
-.pages tbody { display: block; border-top: 1px solid var(--line); }
-.pages tr {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) 44px; grid-template-areas: "page page rm" "rev st st" "links links links";
-  column-gap: 10px; row-gap: 6px; padding: 14px 0 8px; border-bottom: 1px solid var(--line); align-items: center;
+/* one column per reviewer */
+.people { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 40px; margin-top: 22px; align-items: start; }
+.person { min-width: 0; }
+.person-h { position: relative; display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 2px solid var(--ink); }
+.ctl { display: flex; align-items: center; flex: none; }
+.av { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: var(--bg); font-weight: 700; flex: none; }
+.pname { font: 600 22px/1.2 var(--hf); overflow-wrap: anywhere; }
+.person-err:empty { display: none; }
+.person-err .err { margin-top: 10px; }
+
+/* the more menu */
+.more { position: relative; flex: none; }
+.more > summary { list-style: none; }
+.more > summary::-webkit-details-marker { display: none; }
+.more[open] > summary { background: var(--soft); color: var(--ink); }
+.menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; width: max-content; max-width: min(360px, calc(100vw - 32px));
+  background: var(--surf); border: 1.5px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px rgba(31, 42, 36, .12); padding: 6px 0;
 }
-.pages td { padding: 0; }
-.c-page { grid-area: page; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.c-rev { grid-area: rev; font-size: 17px; white-space: nowrap; }
-.c-page .path { display: block; }
-.c-rev::after { content: " ·"; color: var(--mut); }
-.c-st { grid-area: st; }
-.c-links { grid-area: links; display: flex; flex-wrap: wrap; column-gap: 18px; margin-left: -2px; }
-.c-links:empty { display: none; }
-.c-rm { grid-area: rm; align-self: start; justify-self: end; }
-.st { display: inline-block; font-size: 17px; font-weight: 600; padding: 4px 12px; border-radius: 999px; background: var(--line); color: var(--ink); white-space: nowrap; }
+.mi {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 16px; border: 0; background: none;
+  text-align: left; font-size: 17px; font-weight: 600; color: var(--acc); cursor: pointer;
+}
+.mi:hover { background: var(--soft); }
+.mi svg { flex: none; }
+.menu > * + * { border-top: 1px solid var(--line); }
+.dl { padding-bottom: 10px; }
+.dl-s { font-size: 16px; color: var(--mut); padding: 0 16px 0 44px; }
+.dl .err { margin: 8px 16px 0; }
+
+/* new-link flash, in the reviewer's column */
+.flash { margin-top: 14px; padding: 14px 0 6px; border-bottom: 1px solid var(--line); }
+.flash-h { font: 600 20px/1.3 var(--hf); }
+.flash-s { margin: 4px 0 10px; font-size: 16px; color: var(--mut); }
+.flash-url { display: block; font-size: 16px; font-weight: 600; background: var(--surf); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow-wrap: anywhere; user-select: all; }
+.flash-row { display: flex; gap: 4px; margin-top: 8px; margin-left: -10px; }
+
+/* ready strip: a rule at the left, no box */
+.ready { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 14px 0 4px; padding: 12px 0 12px 14px; border-left: 4px solid var(--acc); }
+.ready p { font-weight: 600; }
+.cmd { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 44px; padding: 0 4px 0 12px; background: var(--surf); border: 1px solid var(--line); border-radius: 8px; }
+.cmd code { font-size: 15px; font-weight: 600; user-select: all; min-width: 0; padding: 8px 0; }
+.cmd .tok { white-space: nowrap; }
+.cmd .btn { flex: none; }
+
+/* pages: ruled rows */
+.pgs { list-style: none; margin: 0; padding: 0; }
+.pg { display: flex; gap: 12px; align-items: flex-start; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.pg .err { margin-top: 8px; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; margin-top: 0; }
+.st { display: inline-block; font-size: 15px; font-weight: 600; padding: 3px 11px; border-radius: 999px; background: var(--line); color: var(--ink); white-space: nowrap; }
 .st.open { background: var(--warn-bg); color: var(--warn); }
 .st.in_progress { background: var(--soft); color: var(--acc); }
 .st.done { background: var(--acc); color: var(--acc-ink); }
-.lnk { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--acc); font-weight: 600; font-size: 17px; text-decoration: none; white-space: nowrap; }
+.counts { font-size: 16px; color: var(--mut); }
+.counts b { color: var(--warn); font-weight: 700; }
+.lnk { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--acc); font-weight: 600; font-size: 16px; text-decoration: none; white-space: nowrap; }
 .lnk:hover span { text-decoration: underline; }
 .lnk.plain { color: var(--mut); }
 .lnk.plain:hover span { text-decoration: none; }
-.rm { display: grid; place-items: center; width: 44px; height: 44px; border: 0; background: none; color: var(--mut); border-radius: 50%; cursor: pointer; }
+.rm { display: grid; place-items: center; flex: none; width: 44px; height: 44px; margin-top: -8px; border: 0; background: none; color: var(--mut); border-radius: 50%; cursor: pointer; }
 .rm:hover { background: var(--warn-bg); color: var(--warn); }
+.none { color: var(--mut); padding: 14px 0; border-bottom: 1px solid var(--line); }
+.add { margin-top: 6px; margin-left: -10px; }
+
+/* Assign pages: the one raised surface. A 600px panel at the right on a laptop, full screen on a phone. */
+html.ttf-lock { overflow: hidden; }
+.assign-layer { position: fixed; inset: 0; z-index: 20; }
+.scrim { position: absolute; inset: 0; background: rgba(31, 42, 36, .42); }
+.panel {
+  position: absolute; inset: 0; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain;
+  padding: 18px 16px 22px; background: var(--surf); color: var(--ink);
+}
+.pbody { border: 0; margin: 0; padding: 0; min-width: 0; }
+.panel-h { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
+.panel-h .h2:focus { outline: none; }
+.panel-h .ico { border: 0; background: none; margin-right: -10px; }
+.panel .lbl { font-size: 15px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--mut); margin-bottom: 6px; }
+.seg { display: inline-flex; max-width: 100%; flex-wrap: wrap; border: 1.5px solid var(--line); border-radius: 26px; padding: 2px; background: var(--surf); }
+.seg button {
+  min-height: 44px; padding: 0 16px; border: 0; border-radius: 999px; background: none; font-size: 16px; font-weight: 600;
+  color: var(--mut); white-space: nowrap; cursor: pointer;
+}
+.seg button:hover { color: var(--ink); }
+.seg button[aria-pressed="true"] { background: var(--ink); color: var(--bg); }
+.seg button:focus-visible, .ico:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
+.field {
+  display: flex; align-items: center; gap: 10px; min-height: 50px; margin-top: 16px; padding: 0 14px; box-sizing: border-box;
+  border: 1.5px solid var(--line); border-radius: 12px; background: var(--bg); color: var(--mut);
+}
+.field:focus-within { border-color: var(--acc); background: var(--surf); color: var(--ink); }
+.field svg { flex: none; }
+.field input { flex: 1 1 auto; min-width: 0; min-height: 46px; border: 0; padding: 0; background: none; font: inherit; font-size: 17px; color: var(--ink); outline: none; }
+.field input::placeholder { color: var(--mut); opacity: 1; }
+.field input::-webkit-search-cancel-button { -webkit-appearance: none; }
+.sub-h { font-size: 15px; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--mut); margin: 18px 0 4px; }
+.pick { position: relative; display: flex; align-items: center; gap: 14px; padding: 12px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
+.pick .tt, .pick .tu { display: block; }
+.cb { position: absolute; left: 4px; top: 50%; width: 26px; height: 26px; margin: -13px 0 0; opacity: 0; cursor: pointer; }
+.box { width: 26px; height: 26px; box-sizing: border-box; flex: none; display: grid; place-items: center; border: 2px solid var(--mut); border-radius: 7px; background: var(--surf); color: #fff; }
+.box svg { visibility: hidden; }
+.cb:checked + .box { background: var(--acc); border-color: var(--acc); }
+.cb:checked + .box svg { visibility: visible; }
+.cb:focus-visible + .box { outline: 3px solid var(--acc); outline-offset: 2px; }
+.pick:hover .box { border-color: var(--acc); }
+.picks-none { font-size: 17px; color: var(--mut); padding: 12px 0; border-bottom: 1px solid var(--line); }
+.already { font-size: 16px; color: var(--mut); margin-top: 10px; }
+.panel .err { margin-top: 14px; white-space: pre-line; }
+.manual { margin-top: 6px; }
+.panel-foot { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-top: 16px; flex-wrap: wrap; }
+.panel-foot > .btn.quiet { margin-left: -10px; }
+.btn:disabled { background: var(--line); color: var(--mut); cursor: default; }
+@media (min-width: 700px) {
+  .panel-foot.end { justify-content: flex-end; }
+  .panel { left: auto; width: 600px; padding: 22px 24px 24px; border-left: 1px solid var(--line); box-shadow: -12px 0 32px rgba(31, 42, 36, .16); }
+}
 
 /* sites */
-.site-list { list-style: none; margin: 12px 0 0; padding: 0; border-top: 1px solid var(--line); }
-.site-row { display: flex; flex-direction: column; gap: 2px; padding: 14px 0; border-bottom: 1px solid var(--line); }
-.site-row code { font-size: 17px; color: var(--ink); }
+.sites { margin-top: 48px; }
+.sec-h { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
+.rule { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.siterow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.siterow .more-line { flex-basis: 100%; }
+.siterow code { font-size: 16px; color: var(--ink); }
 
 /* token form */
 .token { max-width: 420px; margin: 48px auto 0; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
 .notice { font: 400 21px/1.45 var(--hf); margin: 24px 0 0; }
 .muted { color: var(--mut); }
 
+/* phones: the controls move under the name rather than squeezing it; the menu spans the header */
+@media (max-width: 480px) {
+  .person-h { flex-wrap: wrap; row-gap: 2px; }
+  .person-h .grow { flex: 1 1 calc(100% - 52px); }
+  .ctl { flex-basis: 100%; box-sizing: border-box; padding-left: 42px; }
+  .more { position: static; }
+  .menu { left: 0; right: 0; width: auto; max-width: none; top: 100%; }
+}
 @media (min-width: 640px) {
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .manual .grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (min-width: 900px) {
-  main { padding: 40px 32px 72px; }
-  .owner {
-    grid-template-columns: 290px minmax(0, 1fr); grid-template-rows: auto auto 1fr;
-    grid-template-areas: "side ready" "side pages" "side sites"; column-gap: 44px; row-gap: 40px;
-  }
-  .a-side { border-right: 1px solid var(--line); padding-right: 24px; align-self: stretch; }
-  .owner { row-gap: 0; }
-  .a-ready:not(:empty) ~ .a-pages { margin-top: 36px; }
-  .a-sites { margin-top: 56px; }
-}
-@media (min-width: 1200px) {
-  .pages thead { display: table-header-group; }
-  .pages tbody { display: table-row-group; border-top: 0; }
-  .pages tr { display: table-row; }
-  .pages th {
-    text-align: left; font-size: 17px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--mut);
-    padding: 10px 12px; border-bottom: 1px solid var(--line);
-  }
-  .pages td { padding: 14px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-  .pages td:first-child, .pages th:first-child { padding-left: 0; }
-  .pages td:last-child, .pages th:last-child { padding-right: 0; width: 44px; }
-  .c-page { display: table-cell; }
-  .c-page .tt, .c-page .tu { display: block; }
-  .c-page .path { display: inline; }
-  .c-rev::after { content: none; }
-  .c-links { display: table-cell; white-space: nowrap; }
-  .c-links:empty { display: table-cell; }
-  .c-links .lnk + .lnk { margin-left: 16px; }
-  .ready { flex-direction: row; align-items: center; justify-content: space-between; gap: 20px; }
-  .cmd { flex: none; }
-  .ready { flex-wrap: wrap; }
-  .dl { flex-basis: 100%; }
+  main { padding: 32px 32px 72px; }
 }
 `;
 
@@ -538,8 +765,14 @@ export async function mountOwner(win: Window): Promise<void> {
   host.innerHTML = '<main aria-live="polite"></main>';
   const main = host.querySelector("main")!;
 
+  /** The page behind the assign panel must not scroll; every path that adds or removes the panel says so here. */
+  const setLock = (on: boolean) => {
+    doc.documentElement.classList.toggle("ttf-lock", on);
+  };
+
   const showTokenForm = () => {
     main.innerHTML = renderTokenForm();
+    setLock(false);
   };
 
   // Hash first (and remember it), then storage.
@@ -569,7 +802,7 @@ export async function mountOwner(win: Window): Promise<void> {
     }
   }
 
-  const state: OwnerState = { sites: [], overview: { reviewers: [], assignments: [] }, selectedReviewerId: null, flash: null };
+  const state: OwnerState = { sites: [], overview: { reviewers: [], assignments: [] }, assignFor: null, assign: null, flash: null };
 
   main.addEventListener("submit", (ev) => {
     const form = (ev.target as Element | null)?.closest?.("form[data-form]") as HTMLFormElement | null;
@@ -578,10 +811,153 @@ export async function mountOwner(win: Window): Promise<void> {
     void onSubmit(form);
   });
   main.addEventListener("click", (ev) => {
+    const inside = (ev.target as Element | null)?.closest?.("details.more");
+    for (const d of main.querySelectorAll("details.more[open]")) if (d !== inside) d.removeAttribute("open");
     const el = (ev.target as Element | null)?.closest?.("[data-action], [data-copy]") as HTMLElement | null;
     if (!el) return;
     void onClick(el);
   });
+
+  // The assign panel updates in place while typing and ticking, so focus and the keyboard stay put.
+  const panelInput = (ev: Event) => {
+    const d = state.assign;
+    const t = ev.target as HTMLInputElement | HTMLSelectElement | null;
+    if (!d || !state.assignFor || !t) return;
+    if (d.busy) {
+      // The fieldset is disabled; this only catches what slips past it. Undo a tick.
+      if (t.matches("input.cb[data-key]")) (t as HTMLInputElement).checked = d.picked.includes(t.getAttribute("data-key")!);
+      return;
+    }
+    if (t.matches("[data-assign-search]")) {
+      // Only on typing: the search's own "change" fires on blur, which is mid-tap on a row, and
+      // re-rendering the list then would swallow that tap.
+      if (ev.type !== "input") return;
+      d.query = t.value;
+      const list = main.querySelector("[data-picks]");
+      if (list) list.innerHTML = picksHtml(state, state.assignFor, d);
+    } else if (t.matches("input.cb[data-key]")) {
+      const key = t.getAttribute("data-key")!;
+      d.picked = d.picked.filter((k) => k !== key);
+      if ((t as HTMLInputElement).checked) d.picked.push(key);
+    } else if (t.closest("[data-manual]") && (t.name === "site" || t.name === "path" || t.name === "title")) {
+      d.manual[t.name] = t.value;
+    } else {
+      return;
+    }
+    updateSubmit();
+  };
+  main.addEventListener("input", panelInput);
+  main.addEventListener("change", panelInput);
+
+  doc.addEventListener("keydown", (ev) => {
+    if (!state.assignFor || !main.isConnected) return;
+    const panel = main.querySelector("[data-assign-panel] [role=dialog]") as HTMLElement | null;
+    if (!panel) return;
+    const t = ev.target as Element | null;
+    if (ev.key === "Enter" && t?.matches?.("[data-manual] input")) {
+      ev.preventDefault();
+      void submitAssign();
+    } else if (ev.key === "Escape") {
+      ev.preventDefault();
+      closeAssign();
+    } else if (ev.key === "Tab") {
+      // Keep focus inside the dialog.
+      const items = [...panel.querySelectorAll<HTMLElement>("button:not([disabled]), input, select")];
+      if (!items.length) return;
+      const first = items[0];
+      const last = items[items.length - 1];
+      const active = doc.activeElement;
+      if (ev.shiftKey && (active === first || !panel.contains(active))) {
+        ev.preventDefault();
+        last.focus();
+      } else if (!ev.shiftKey && (active === last || !panel.contains(active))) {
+        ev.preventDefault();
+        first.focus();
+      }
+    }
+  });
+
+  function updateSubmit(): void {
+    const d = state.assign;
+    const reviewer = state.overview.reviewers.find((r) => r.id === state.assignFor);
+    const btn = main.querySelector("[data-action=assign-submit]") as HTMLButtonElement | null;
+    if (!d || !reviewer || !btn) return;
+    const n = assignCount(state.overview, reviewer.id, d);
+    btn.textContent = assignLabel(n, reviewerLabel(state.overview.reviewers, reviewer.name));
+    btn.disabled = n === 0 || d.busy;
+    const body = main.querySelector("[data-assign-body]") as HTMLFieldSetElement | null;
+    if (body) body.disabled = d.busy;
+  }
+
+  function focusOpener(opener: string | undefined): void {
+    if (!opener) return;
+    (main.querySelector(`[data-person="${CSS.escape(opener)}"] [data-action=assign]`) as HTMLElement | null)?.focus();
+  }
+
+  function closeAssign(): void {
+    // Mid-submit, the outcome still has to land somewhere it can be seen.
+    if (state.assign?.busy) return;
+    const opener = state.assign?.opener;
+    state.assignFor = null;
+    state.assign = null;
+    render();
+    focusOpener(opener);
+  }
+
+  async function submitAssign(): Promise<void> {
+    const d = state.assign;
+    const reviewerId = state.assignFor;
+    if (!d || !reviewerId || d.busy) return;
+    type Job = { site: string; path: string; title: string; key: string | null };
+    // Oldest of the list first, so the column ends up in the list's order (newest at the top).
+    const jobs: Job[] = pickedCandidates(state.overview, reviewerId, d)
+      .reverse()
+      .map((c) => ({ site: c.site, path: c.path, title: c.title, key: pageKey(c.site, c.path) }));
+    if (manualStarted(d)) {
+      const path = d.manual.path.trim();
+      const title = d.manual.title.trim();
+      if (!path || !title) {
+        d.error = MSG_MANUAL_INCOMPLETE;
+        render();
+        return;
+      }
+      jobs.push({ site: d.manual.site || state.sites[0]?.slug || "", path, title, key: null });
+    }
+    if (!jobs.length) return;
+    d.busy = true;
+    d.error = null;
+    updateSubmit();
+    const failures: string[] = [];
+    for (const job of jobs) {
+      const res = await api(tok, "/api/owner/assignments", {
+        method: "POST",
+        json: { site: job.site, reviewer_id: reviewerId, path: job.path, title: job.title },
+      });
+      if (res.ok) {
+        if (job.key) d.picked = d.picked.filter((k) => k !== job.key);
+        else d.manual = { site: d.manual.site, path: "", title: "" };
+      } else if (res.status === 401 || res.status === 403) {
+        return forgetToken();
+      } else {
+        failures.push(jobs.length === 1 ? errorText(res) : `${job.title}: ${errorText(res)}`);
+      }
+    }
+    d.busy = false;
+    if (failures.length === 0) {
+      state.assignFor = null;
+      state.assign = null;
+      if (await refresh()) focusOpener(d.opener);
+      return;
+    }
+    d.error = failures.join("\n");
+    if (!(await refresh())) return;
+    // The re-render reset the panel's scroll and focus; bring the error into view and announce it.
+    const err = main.querySelector("[data-assign-panel] [data-error]") as HTMLElement | null;
+    if (err) {
+      err.scrollIntoView({ block: "center" });
+      err.focus();
+    }
+  }
 
   if (!token) {
     showTokenForm();
@@ -600,6 +976,7 @@ export async function mountOwner(win: Window): Promise<void> {
 
   const render = () => {
     main.innerHTML = renderOwner(state);
+    setLock(main.querySelector("[data-assign-panel]") !== null);
   };
 
   /** Fetches everything; false when the token was refused (the token form is showing). */
@@ -613,12 +990,14 @@ export async function mountOwner(win: Window): Promise<void> {
     }
     if (!ov.ok || !sites.ok) {
       main.innerHTML = `<p class="notice">${MSG_OFFLINE}</p><button type="button" class="btn" data-action="retry">Try again</button>`;
+      setLock(false);
       return false;
     }
     state.overview = ov.data;
     state.sites = sites.data;
-    if (state.selectedReviewerId && !state.overview.reviewers.some((r) => r.id === state.selectedReviewerId)) {
-      state.selectedReviewerId = null;
+    if (state.assignFor && !state.overview.reviewers.some((r) => r.id === state.assignFor)) {
+      state.assignFor = null;
+      state.assign = null;
     }
     render();
     return true;
@@ -631,8 +1010,8 @@ export async function mountOwner(win: Window): Promise<void> {
     line.hidden = false;
   };
 
-  const linkFlash = (r: { name: string; token: string }) => {
-    state.flash = { kind: "link", name: r.name, url: reviewerLink(win.location.origin, r.token) };
+  const linkFlash = (r: { id: string; name: string; token: string }) => {
+    state.flash = { kind: "link", id: r.id, name: r.name, url: reviewerLink(win.location.origin, r.token) };
   };
 
   async function onSubmit(form: HTMLFormElement): Promise<void> {
@@ -653,10 +1032,7 @@ export async function mountOwner(win: Window): Promise<void> {
       if (res.ok) {
         const r = res.data as { id: string; name: string; token: string };
         linkFlash(r);
-        state.selectedReviewerId = r.id;
       }
-    } else if (kind === "assign") {
-      res = await api(tok, "/api/owner/assignments", { method: "POST", json: data });
     } else if (kind === "site") {
       res = await api(tok, "/api/owner/sites", { method: "POST", json: data });
     } else {
@@ -693,10 +1069,38 @@ export async function mountOwner(win: Window): Promise<void> {
       await downloadBatch(el, id, el.getAttribute("data-site") ?? "");
     } else if (action === "retry") {
       main.innerHTML = '<p class="notice muted">Loading…</p>';
+      setLock(false);
       await refresh();
-    } else if (action === "select") {
-      state.selectedReviewerId = id && state.selectedReviewerId !== id ? id : null;
+    } else if (action === "assign" && reviewer) {
+      state.assignFor = id;
+      state.assign = emptyDraft(id);
       render();
+      (main.querySelector("#assign-h") as HTMLElement | null)?.focus();
+    } else if (action === "assign-close") {
+      closeAssign();
+    } else if (action === "assign-scrim") {
+      // A stray tap beside the panel must not throw away ticks or typing; the X and Escape still close.
+      const d = state.assign;
+      if (d && (d.picked.length > 0 || (d.manualOpen && (d.manual.path.trim() !== "" || d.manual.title.trim() !== "")))) return;
+      closeAssign();
+    } else if (state.assign?.busy && (action === "assign-to" || action === "assign-manual" || action === "assign-submit")) {
+      return;
+    } else if (action === "assign-to" && reviewer && state.assign) {
+      // Pages the new reviewer already has cannot stay ticked.
+      const have = new Set(pageCandidates(state.overview, id).already.map((x) => pageKey(x.site, x.path)));
+      state.assign.picked = state.assign.picked.filter((k) => !have.has(k));
+      state.assignFor = id;
+      render();
+      (main.querySelector(`[data-action=assign-to][data-id="${CSS.escape(id)}"]`) as HTMLElement | null)?.focus();
+    } else if (action === "assign-manual" && state.assign) {
+      const d = state.assign;
+      d.manualOpen = !d.manualOpen;
+      if (d.manualOpen && !d.manual.site) d.manual.site = state.sites[0]?.slug ?? "";
+      if (!d.manualOpen && d.error === MSG_MANUAL_INCOMPLETE) d.error = null;
+      render();
+      (main.querySelector(d.manualOpen ? "[data-manual] select" : "[data-action=assign-manual]") as HTMLElement | null)?.focus();
+    } else if (action === "assign-submit") {
+      await submitAssign();
     } else if (action === "dismiss") {
       state.flash = null;
       render();
@@ -712,7 +1116,7 @@ export async function mountOwner(win: Window): Promise<void> {
       if (!win.confirm(revokeConfirm(reviewer.name))) return;
       const res = await api(tok, `/api/owner/reviewers/${encodeURIComponent(id)}/revoke`, { method: "POST" });
       if (!res.ok) return failNear(el, res);
-      if (state.flash && state.flash.name === reviewer.name) state.flash = null;
+      if (state.flash && state.flash.id === reviewer.id) state.flash = null;
       await refresh();
     } else if (action === "remove") {
       const a = state.overview.assignments.find((x) => x.id === id);
@@ -753,14 +1157,14 @@ export async function mountOwner(win: Window): Promise<void> {
     } catch {
       fail(MSG_OFFLINE);
     } finally {
-      if (label) label.textContent = "Download batch file";
+      if (label) label.textContent = el.getAttribute("data-label") ?? "Download batch file";
     }
   }
 
-  /** A --warn line next to the control that failed: under the reviewer's link buttons, or in the page cell. */
+  /** A --warn line next to the control that failed: in the page row, or under the reviewer's header. */
   function failNear(el: HTMLElement, res: { status: number; error?: string }): void {
     if (res.status === 401 || res.status === 403) return forgetToken();
-    const spot = (el.closest(".rv-actions") ?? el.closest("tr")?.querySelector(".c-page")) as HTMLElement | null;
+    const spot = (el.closest(".pg")?.querySelector(".grow") ?? el.closest(".person")?.querySelector(".person-err")) as HTMLElement | null;
     if (!spot) return;
     let line = spot.querySelector(":scope > .err") as HTMLElement | null;
     if (!line) {

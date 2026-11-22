@@ -167,8 +167,8 @@ owner.get("/overview", async (c) => {
     "SELECT id, name, revoked_at FROM reviewers ORDER BY created_at, id",
   ).all<{ id: string; name: string; revoked_at: string | null }>();
   const assignmentRows = await c.env.DB.prepare(
-    "SELECT id, site_slug, reviewer_id, path, title FROM assignments ORDER BY created_at, id",
-  ).all<{ id: string; site_slug: string; reviewer_id: string; path: string; title: string }>();
+    "SELECT id, site_slug, reviewer_id, path, title, created_at FROM assignments ORDER BY created_at DESC, id DESC",
+  ).all<{ id: string; site_slug: string; reviewer_id: string; path: string; title: string; created_at: string }>();
   const commentRows = await c.env.DB.prepare(
     "SELECT assignment_id, status, pr_url FROM comments ORDER BY created_at, id",
   ).all<{ assignment_id: string; status: Status; pr_url: string | null }>();
@@ -196,6 +196,7 @@ owner.get("/overview", async (c) => {
       site: a.site_slug,
       path: a.path,
       title: a.title,
+      created_at: a.created_at,
       reviewer: { id: a.reviewer_id, name: reviewerName.get(a.reviewer_id) ?? "" },
       status: assignmentStatus(statuses),
       counts: {

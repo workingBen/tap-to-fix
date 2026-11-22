@@ -117,6 +117,19 @@ describe("overview", () => {
     expect(by(a3.id)).toMatchObject({ status: "in_progress", pr_urls: [] });
   });
 
+  it("overview lists assignments newest first with created_at", async () => {
+    const { env, site, reviewer } = await setup();
+    const first = await json(await post(env, "/api/owner/assignments", { site: site.slug, reviewer_id: reviewer.id, path: "/a", title: "A" }));
+    const second = await json(await post(env, "/api/owner/assignments", { site: site.slug, reviewer_id: reviewer.id, path: "/b", title: "B" }));
+    // Force distinct, known timestamps so the order does not hinge on the clock.
+    await env.DB.prepare("UPDATE assignments SET created_at = ? WHERE id = ?").bind("2026-01-01T00:00:00.000Z", first.id).run();
+    await env.DB.prepare("UPDATE assignments SET created_at = ? WHERE id = ?").bind("2026-01-02T00:00:00.000Z", second.id).run();
+    const ov = await json(await ownerFetch(env, "/api/owner/overview"));
+    expect(ov.assignments.map((x: any) => x.id)).toEqual([second.id, first.id]); // eslint-disable-line @typescript-eslint/no-explicit-any
+    expect(ov.assignments[0].created_at).toBe("2026-01-02T00:00:00.000Z");
+    expect(ov.assignments[1].created_at).toBe("2026-01-01T00:00:00.000Z");
+  });
+
   it("reports not_started for an assignment with no comments", async () => {
     const { env, site, reviewer } = await setup();
     const a = await json(await post(env, "/api/owner/assignments", { site: site.slug, reviewer_id: reviewer.id, path: "/a", title: "A" }));
