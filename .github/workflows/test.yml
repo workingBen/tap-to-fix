@@ -1,0 +1,57 @@
+name: test
+
+# Manual runs only for now. While the repo is private, Actions minutes come out of a paid budget.
+# When the repo goes public, replace this trigger block with:
+#
+#   on:
+#     pull_request:
+#     push:
+#       branches: [main]
+#     workflow_dispatch:
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: service
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: service/.nvmrc
+          cache: npm
+          cache-dependency-path: service/package-lock.json
+
+      - run: npm ci
+
+      - name: Unit and route tests
+        run: npm test
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Install Playwright browsers
+        run: npx playwright install --with-deps chromium firefox
+
+      - name: Browser tests
+        run: npm run e2e
+
+      - name: Upload Playwright results on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-results
+          path: service/.local/e2e-results
+          retention-days: 7
