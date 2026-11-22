@@ -1,6 +1,6 @@
 // Bundles the browser code into public/. Run: node scripts/build-client.mjs [--watch]
 import { context, build } from "esbuild";
-import { copyFileSync, mkdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -17,7 +17,12 @@ const targets = [
 mkdirSync(join(root, "public"), { recursive: true });
 mkdirSync(join(root, "public", "r"), { recursive: true });
 mkdirSync(join(root, "public", "o"), { recursive: true });
-copyFileSync(join(root, "client/pages/r.html"), join(root, "public/r/index.html"));
+// Link previews (iMessage, Slack) want an absolute image URL. deploy.mjs passes the saved service
+// URL; a plain https origin is the only thing accepted, else the path stays relative.
+const origin = /^https:\/\/[a-z0-9.-]+(:\d+)?$/i.test(process.env.TTF_PUBLIC_URL ?? "") ? process.env.TTF_PUBLIC_URL : "";
+const reviewerPage = readFileSync(join(root, "client/pages/r.html"), "utf8").replace("__OG_IMAGE__", `${origin}/r/og.jpg`);
+writeFileSync(join(root, "public/r/index.html"), reviewerPage);
+copyFileSync(join(root, "client/pages/og.jpg"), join(root, "public/r/og.jpg"));
 copyFileSync(join(root, "client/pages/o.html"), join(root, "public/o/index.html"));
 writeFileSync(
   join(root, "public", "_headers"),

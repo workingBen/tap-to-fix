@@ -6,6 +6,11 @@ All notable changes to tap-to-fix are listed here. The format follows
 
 ## Unreleased
 
+### Added
+
+- Reviewer links show a picture card when texted or pasted (iMessage, Slack): "Tap to Fix · Your pages to review".
+  `npm run deploy` makes the image URL absolute using the saved service URL.
+
 ## 0.4.0 - 2026-11-22
 
 ### Added

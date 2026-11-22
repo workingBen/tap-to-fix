@@ -23,7 +23,7 @@ const DB_ID = "0b7c3f6e-1a2b-4c3d-8e9f-0123456789ab";
 const NEW_DB_ID = "9f8e7d6c-5b4a-4321-9abc-def012345678";
 const URL = "https://tap-to-fix.bens-sub.workers.dev";
 
-type Call = { cmd: string; args: string[]; opts: { cwd?: string; input?: string } };
+type Call = { cmd: string; args: string[]; opts: { cwd?: string; input?: string; env?: Record<string, string> } };
 type Res = { code: number; stdout: string; stderr?: string };
 const isWrangler = (cmd: string) => cmd.endsWith(join("node_modules", ".bin", "wrangler"));
 
@@ -193,6 +193,22 @@ describe("deploy", () => {
     const cfg = JSON.parse(readFileSync(configFile(s.home), "utf8"));
     expect(cfg.owner_token).toBe("KEPTtokenSECRET");
     expect(cfg.link_key).toBe("KEPTlinkKEY");
+  });
+
+  it("builds the client with the saved service URL, for the reviewer link preview", async () => {
+    const s = setup();
+    saveConfig({ service: URL, owner_token: "KEPTtokenSECRET", link_key: "KEPTlinkKEY" }, { home: s.home });
+    const acct = fakeAccount({ dbs: [{ name: "tap-to-fix", uuid: DB_ID }], buckets: ["tap-to-fix-shots"] });
+    expect(await deploy([], deps(s, acct.run, fakeWorker({ liveToken: "KEPTtokenSECRET" }).fetchImpl))).toBe(0);
+    const build = acct.calls.find((c) => c.cmd === "npm")!;
+    expect(build.opts?.env).toEqual({ TTF_PUBLIC_URL: URL });
+  });
+
+  it("a first deploy builds without a service URL (the preview image stays relative)", async () => {
+    const s = setup();
+    const acct = fakeAccount();
+    expect(await deploy([], deps(s, acct.run, fakeWorker().fetchImpl))).toBe(0);
+    expect(acct.calls.find((c) => c.cmd === "npm")!.opts?.env).toBeUndefined();
   });
 
   it("a kept owner token is never printed: the owner link line says unchanged", async () => {

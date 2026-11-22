@@ -176,7 +176,7 @@ export function plan({ hasToken, rotate, hasLinkKey = false }) {
 
 /**
  * Runs the deploy. Returns the exit code: 0 ok, 1 error, 3 not signed in to Cloudflare (or offline).
- * run(cmd, args, { cwd, input }) → Promise<{ code, stdout, stderr? }>
+ * run(cmd, args, { cwd, input, env }) → Promise<{ code, stdout, stderr? }>
  */
 export async function deploy(argv, deps) {
   const {
@@ -199,7 +199,7 @@ export async function deploy(argv, deps) {
     return 1;
   }
 
-  const { owner_token: saved, link_key: savedKey } = readSaved(home);
+  const { owner_token: saved, link_key: savedKey, service: savedService } = readSaved(home);
   if (dryRun) {
     out(`Dry run: nothing runs. A deploy runs these, in order, in ${serviceDir}:`);
     for (const step of plan({ hasToken: !!saved, rotate, hasLinkKey: !!savedKey })) out(`  ${step.line}${step.note ? `    (${step.note})` : ""}`);
@@ -318,7 +318,8 @@ export async function deploy(argv, deps) {
   say("Migrations applied.");
 
   // 5. Build first, so a failed build never leaves a new live secret that was never saved.
-  const build = await run("npm", ["run", "build:client"], { cwd: serviceDir });
+  // The saved URL makes the reviewer page's link preview image absolute; a first deploy has none yet.
+  const build = await run("npm", ["run", "build:client"], savedService ? { cwd: serviceDir, env: { TTF_PUBLIC_URL: savedService } } : { cwd: serviceDir });
   if (build.code !== 0) return fail("Building the client (npm run build:client)", build);
   say("Client built.");
 
@@ -390,9 +391,9 @@ function readSaved(home) {
   const str = (v) => (typeof v === "string" && v ? v : null);
   try {
     const raw = JSON.parse(readFileSync(configPath(home), "utf8"));
-    return { owner_token: str(raw.owner_token), link_key: str(raw.link_key) };
+    return { owner_token: str(raw.owner_token), link_key: str(raw.link_key), service: str(raw.service) };
   } catch {
-    return { owner_token: null, link_key: null };
+    return { owner_token: null, link_key: null, service: null };
   }
 }
 
@@ -450,9 +451,9 @@ export async function liveCheck(service, token, fetchImpl, sleep = async () => {
 }
 
 /** The real run: no shell, stdin gets `input` and is then closed, output captured. CLOUDFLARE_ENV is dropped. */
-export function spawnRun(cmd, args, { cwd, input } = {}) {
+export function spawnRun(cmd, args, { cwd, input, env } = {}) {
   return new Promise((resolve) => {
-    const childEnv = { ...process.env };
+    const childEnv = { ...process.env, ...env };
     delete childEnv.CLOUDFLARE_ENV;
     const child = spawn(cmd, args, { cwd, env: childEnv, stdio: ["pipe", "pipe", "pipe"] });
     let stdout = "";
