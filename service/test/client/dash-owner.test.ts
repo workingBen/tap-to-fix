@@ -507,6 +507,27 @@ describe("assign pages panel", () => {
       expect((p.querySelector("input[type=search]") as HTMLInputElement).value).toBe("det");
       expect([...p.querySelectorAll(".pick .tt")].map((t) => t.textContent)).toEqual(["Digital Detox Retreat"]);
     });
+    it("two reviewers who share a first name go by full name in To, the column button and the submit", () => {
+      const smith = { ...BEN, id: "r4", name: "Alexis Smith" };
+      const box = document.createElement("div");
+      box.innerHTML = renderOwner(
+        state({
+          sites: THREE,
+          overview: { ...overview, reviewers: [ALEXIS, BEN, smith] },
+          assignFor: "r4",
+          assign: { opener: "r4", picked: ["alexis-art|/gallery"], query: "", manualOpen: false, manual: { site: "", path: "", title: "" }, error: null, busy: false },
+        }),
+        NOW,
+      );
+      expect([...box.querySelectorAll("[data-action=assign-to]")].map((b) => b.textContent)).toEqual(["Alexis Rivera", "Ben", "Alexis Smith"]);
+      expect(box.querySelector("[data-person=r1] [data-action=assign]")!.textContent).toBe("Assign a page to Alexis Rivera");
+      expect(box.querySelector("[data-person=r2] [data-action=assign]")!.textContent).toBe("Assign a page to Ben");
+      expect(box.querySelector("[data-action=assign-submit]")!.textContent).toBe("Assign 1 page to Alexis Smith");
+    });
+    it("the panel body is a fieldset, disabled while busy", () => {
+      expect((render().querySelector("fieldset[data-assign-body]") as HTMLFieldSetElement).disabled).toBe(false);
+      expect((render({ busy: true }).querySelector("fieldset[data-assign-body]") as HTMLFieldSetElement).disabled).toBe(true);
+    });
     it("shows a saved error line", () => {
       expect(render({ error: "Not found" }).querySelector("[data-error]")!.textContent).toBe("Not found");
     });
@@ -800,6 +821,44 @@ describe("mountOwner", () => {
       expect(panel()).not.toBeNull();
       open();
       await vi.waitFor(() => expect(panel()!.querySelector("[data-error]")?.textContent).toContain("Not found"));
+    });
+    it("while busy, switching the reviewer, the manual toggle and ticks do nothing", async () => {
+      let open!: () => void;
+      gate = new Promise((res) => (open = res));
+      await mountOwner(window);
+      openFor("r2");
+      tick("/gallery");
+      submit().click();
+      await vi.waitFor(() => expect(posts).toHaveLength(1));
+      expect((panel()!.querySelector("fieldset[data-assign-body]") as HTMLFieldSetElement).disabled).toBe(true);
+      (panel()!.querySelector("[data-action=assign-to][data-id=r1]") as HTMLButtonElement).click();
+      (panel()!.querySelector("[data-action=assign-manual]") as HTMLButtonElement).click();
+      tick("/protocols/sauna");
+      expect(panel()!.querySelector("[aria-pressed=true]")!.textContent).toBe("Ben");
+      expect(panel()!.querySelector("[data-manual]")).toBeNull();
+      open();
+      await vi.waitFor(() => expect(panel()).toBeNull());
+      expect(posts).toHaveLength(1);
+    });
+    it("a tap on the scrim does not throw away ticks or typed fields; the X still closes", async () => {
+      await mountOwner(window);
+      openFor("r2");
+      const scrim = () => panel()!.querySelector("[data-action=assign-scrim]") as HTMLElement;
+      tick("/gallery");
+      scrim().click();
+      expect(panel()).not.toBeNull();
+      tick("/gallery");
+      (panel()!.querySelector("[data-action=assign-manual]") as HTMLButtonElement).click();
+      const title = panel()!.querySelector("[data-manual] input[name=title]") as HTMLInputElement;
+      title.value = "FAQ";
+      title.dispatchEvent(new Event("input", { bubbles: true }));
+      scrim().click();
+      expect(panel()).not.toBeNull();
+      (panel()!.querySelector("[data-action=assign-close]") as HTMLButtonElement).click();
+      expect(panel()).toBeNull();
+      openFor("r2");
+      scrim().click();
+      expect(panel()).toBeNull();
     });
     it("Enter in the Path or Title field submits", async () => {
       await mountOwner(window);

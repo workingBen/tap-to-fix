@@ -109,6 +109,15 @@ export function readyBatches(overview: Overview, sites: Site[] = []): ReadyBatch
   );
 }
 
+/**
+ * How a reviewer is named in the assign controls: the first name, or the full name when another
+ * reviewer shares that first name (two Alexiss must not look identical).
+ */
+export function reviewerLabel(reviewers: { name: string }[], name: string): string {
+  const first = firstName(name);
+  return reviewers.filter((r) => firstName(r.name) === first).length > 1 ? name.trim() : first;
+}
+
 /** One page across reviewers. Slugs never hold "|", so the first one splits it. */
 export const pageKey = (site: string, path: string) => `${site}|${path}`;
 
@@ -121,12 +130,11 @@ export function pageCandidates(overview: Overview, reviewerId: string): { candid
   const already = sorted.filter((x) => x.reviewer.id === reviewerId);
   const have = new Set(already.map((x) => pageKey(x.site, x.path)));
   // A first name shared by two reviewers is ambiguous, so those reviewers go by their full names.
-  const people = new Map<string, string>();
-  for (const r of overview.reviewers) people.set(r.id, r.name);
-  for (const x of sorted) if (!people.has(x.reviewer.id)) people.set(x.reviewer.id, x.reviewer.name);
-  const firstCount = new Map<string, number>();
-  for (const n of people.values()) firstCount.set(firstName(n), (firstCount.get(firstName(n)) ?? 0) + 1);
-  const shown = (name: string) => ((firstCount.get(firstName(name)) ?? 0) > 1 ? name.trim() : firstName(name));
+  const people = new Map<string, { name: string }>();
+  for (const r of overview.reviewers) people.set(r.id, r);
+  for (const x of sorted) if (!people.has(x.reviewer.id)) people.set(x.reviewer.id, x.reviewer);
+  const everyone = [...people.values()];
+  const shown = (name: string) => reviewerLabel(everyone, name);
   const byKey = new Map<string, PageCandidate>();
   const ids = new Map<string, Set<string>>();
   for (const x of sorted) {
@@ -329,9 +337,8 @@ export function assignCount(overview: Overview, reviewerId: string, d: AssignDra
   return pickedCandidates(overview, reviewerId, d).length + (manualStarted(d) ? 1 : 0);
 }
 
-export function assignLabel(n: number, name: string): string {
-  const first = firstName(name);
-  return n ? `Assign ${plural(n, "page", "pages")} to ${first}` : `Assign pages to ${first}`;
+export function assignLabel(n: number, label: string): string {
+  return n ? `Assign ${plural(n, "page", "pages")} to ${label}` : `Assign pages to ${label}`;
 }
 
 /** The checklist rows for the current search; ticks are read from the draft. */
@@ -345,7 +352,7 @@ export function picksHtml(s: OwnerState, reviewerId: string, d: AssignDraft, now
     const why = d.query.trim()
       ? `No pages match “${esc(d.query.trim())}”.`
       : candidates.length === 0 && already.length > 0
-        ? `Every page in use is already on ${esc(firstName(reviewer?.name ?? ""))}'s list.`
+        ? `Every page in use is already on ${esc(reviewerLabel(s.overview.reviewers, reviewer?.name ?? ""))}'s list.`
         : "No pages yet. Add one with A page that isn't listed, below.";
     return `<p class="picks-none">${why}</p>`;
   }
@@ -367,16 +374,17 @@ export function picksHtml(s: OwnerState, reviewerId: string, d: AssignDraft, now
 function assignPanelHtml(s: OwnerState, reviewerId: string, d: AssignDraft, now: Date): string {
   const reviewer = s.overview.reviewers.find((r) => r.id === reviewerId);
   if (!reviewer) return "";
-  const first = esc(firstName(reviewer.name));
+  const label = reviewerLabel(s.overview.reviewers, reviewer.name);
+  const first = esc(label);
   const { already } = pageCandidates(s.overview, reviewerId);
   const seg = s.overview.reviewers
     .map(
       (r) =>
-        `<button type="button" data-action="assign-to" data-id="${esc(r.id)}" aria-pressed="${r.id === reviewerId}">${esc(firstName(r.name))}</button>`,
+        `<button type="button" data-action="assign-to" data-id="${esc(r.id)}" aria-pressed="${r.id === reviewerId}">${esc(reviewerLabel(s.overview.reviewers, r.name))}</button>`,
     )
     .join("");
   const n = assignCount(s.overview, reviewerId, d);
-  const submit = `<button type="button" class="btn" data-action="assign-submit"${n === 0 || d.busy ? " disabled" : ""}>${esc(assignLabel(n, reviewer.name))}</button>`;
+  const submit = `<button type="button" class="btn" data-action="assign-submit"${n === 0 || d.busy ? " disabled" : ""}>${esc(assignLabel(n, label))}</button>`;
   const toggle =
     `<button type="button" class="btn quiet" data-action="assign-manual" aria-expanded="${d.manualOpen}">` +
     `${PLUS}<span>A page that isn't listed</span></button>`;
@@ -397,6 +405,7 @@ function assignPanelHtml(s: OwnerState, reviewerId: string, d: AssignDraft, now:
     `<div class="panel" role="dialog" aria-modal="true" aria-labelledby="assign-h">` +
     `<div class="panel-h"><h2 class="h2" id="assign-h" tabindex="-1">Assign pages</h2>` +
     `<button type="button" class="ico" data-action="assign-close" aria-label="Close" title="Close">${CLOSE}</button></div>` +
+    `<fieldset class="pbody" data-assign-body${d.busy ? " disabled" : ""}>` +
     `<p class="lbl" id="assign-to">To</p><div class="seg" role="group" aria-labelledby="assign-to">${seg}</div>` +
     `<label class="field">${SEARCH}<input type="search" data-assign-search aria-label="Find a page" placeholder="Find a page" autocomplete="off" value="${esc(d.query)}"></label>` +
     `<p class="sub-h">Most recently assigned</p>` +
@@ -405,7 +414,7 @@ function assignPanelHtml(s: OwnerState, reviewerId: string, d: AssignDraft, now:
     (d.manualOpen ? `<div class="panel-foot">${toggle}</div>${manual}` : "") +
     (d.error ? `<p class="err" data-error role="alert" tabindex="-1">${esc(d.error)}</p>` : errLine()) +
     `<div class="panel-foot${d.manualOpen ? " end" : ""}">${d.manualOpen ? "" : toggle}${submit}</div>` +
-    `</div></div>`
+    `</fieldset></div></div>`
   );
 }
 
@@ -435,7 +444,7 @@ function personHtml(s: OwnerState, r: OwnerReviewer, batches: ReadyBatch[]): str
   const add =
     s.sites.length === 0
       ? ""
-      : `<div class="add"><button type="button" class="btn quiet" data-action="assign" data-id="${esc(r.id)}">${PLUS}<span>Assign a page to ${first}</span></button></div>`;
+      : `<div class="add"><button type="button" class="btn quiet" data-action="assign" data-id="${esc(r.id)}">${PLUS}<span>Assign a page to ${esc(reviewerLabel(s.overview.reviewers, r.name))}</span></button></div>`;
   return (
     `<section class="person" data-person="${esc(r.id)}" aria-labelledby="p-${esc(r.id)}">` +
     `<div class="person-h"><span class="av" aria-hidden="true">${initial(r.name)}</span>` +
@@ -631,6 +640,7 @@ html.ttf-lock { overflow: hidden; }
   position: absolute; inset: 0; box-sizing: border-box; overflow-y: auto; overscroll-behavior: contain;
   padding: 18px 16px 22px; background: var(--surf); color: var(--ink);
 }
+.pbody { border: 0; margin: 0; padding: 0; min-width: 0; }
 .panel-h { display: flex; justify-content: space-between; align-items: center; gap: 10px; margin-bottom: 14px; }
 .panel-h .h2:focus { outline: none; }
 .panel-h .ico { border: 0; background: none; margin-right: -10px; }
@@ -656,7 +666,7 @@ html.ttf-lock { overflow: hidden; }
 .pick { position: relative; display: flex; align-items: center; gap: 14px; padding: 12px 4px; border-bottom: 1px solid var(--line); cursor: pointer; }
 .pick .tt, .pick .tu { display: block; }
 .cb { position: absolute; left: 4px; top: 50%; width: 26px; height: 26px; margin: -13px 0 0; opacity: 0; cursor: pointer; }
-.box { width: 26px; height: 26px; box-sizing: border-box; flex: none; display: grid; place-items: center; border: 2px solid #B9B09D; border-radius: 7px; background: var(--surf); color: #fff; }
+.box { width: 26px; height: 26px; box-sizing: border-box; flex: none; display: grid; place-items: center; border: 2px solid var(--mut); border-radius: 7px; background: var(--surf); color: #fff; }
 .box svg { visibility: hidden; }
 .cb:checked + .box { background: var(--acc); border-color: var(--acc); }
 .cb:checked + .box svg { visibility: visible; }
@@ -813,6 +823,11 @@ export async function mountOwner(win: Window): Promise<void> {
     const d = state.assign;
     const t = ev.target as HTMLInputElement | HTMLSelectElement | null;
     if (!d || !state.assignFor || !t) return;
+    if (d.busy) {
+      // The fieldset is disabled; this only catches what slips past it. Undo a tick.
+      if (t.matches("input.cb[data-key]")) (t as HTMLInputElement).checked = d.picked.includes(t.getAttribute("data-key")!);
+      return;
+    }
     if (t.matches("[data-assign-search]")) {
       // Only on typing: the search's own "change" fires on blur, which is mid-tap on a row, and
       // re-rendering the list then would swallow that tap.
@@ -868,8 +883,10 @@ export async function mountOwner(win: Window): Promise<void> {
     const btn = main.querySelector("[data-action=assign-submit]") as HTMLButtonElement | null;
     if (!d || !reviewer || !btn) return;
     const n = assignCount(state.overview, reviewer.id, d);
-    btn.textContent = assignLabel(n, reviewer.name);
+    btn.textContent = assignLabel(n, reviewerLabel(state.overview.reviewers, reviewer.name));
     btn.disabled = n === 0 || d.busy;
+    const body = main.querySelector("[data-assign-body]") as HTMLFieldSetElement | null;
+    if (body) body.disabled = d.busy;
   }
 
   function focusOpener(opener: string | undefined): void {
@@ -1059,8 +1076,15 @@ export async function mountOwner(win: Window): Promise<void> {
       state.assign = emptyDraft(id);
       render();
       (main.querySelector("#assign-h") as HTMLElement | null)?.focus();
-    } else if (action === "assign-close" || action === "assign-scrim") {
+    } else if (action === "assign-close") {
       closeAssign();
+    } else if (action === "assign-scrim") {
+      // A stray tap beside the panel must not throw away ticks or typing; the X and Escape still close.
+      const d = state.assign;
+      if (d && (d.picked.length > 0 || (d.manualOpen && (d.manual.path.trim() !== "" || d.manual.title.trim() !== "")))) return;
+      closeAssign();
+    } else if (state.assign?.busy && (action === "assign-to" || action === "assign-manual" || action === "assign-submit")) {
+      return;
     } else if (action === "assign-to" && reviewer && state.assign) {
       // Pages the new reviewer already has cannot stay ticked.
       const have = new Set(pageCandidates(state.overview, id).already.map((x) => pageKey(x.site, x.path)));
