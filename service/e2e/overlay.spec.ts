@@ -275,6 +275,14 @@ test("the sheet never covers the new pin", async ({ page }) => {
   expect(pin.y).toBeGreaterThan(52);
 });
 
+test("a long status message keeps the pill wide on a phone", async ({ page }) => {
+  await openAsReviewer(page, "/other.html");
+  await expect(bar(page)).toContainText("This page isn't on your review list");
+  const m = await bar(page).evaluate((el) => ({ w: el.getBoundingClientRect().width, vw: innerWidth }));
+  expect(m.w).toBeGreaterThan(300);
+  expect(m.w).toBeLessThanOrEqual(m.vw - 16);
+});
+
 test("unassigned page lets taps through", async ({ page }) => {
   await openAsReviewer(page, "/other.html");
   await expect(bar(page)).toContainText("This page isn't on your review list");

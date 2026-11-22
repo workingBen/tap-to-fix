@@ -19,9 +19,9 @@ svg { flex: none; }
 /* floating review pill, bottom center */
 .bar {
   position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(18px + env(safe-area-inset-bottom));
-  z-index: 2147483647; max-width: calc(100vw - 16px); min-height: 52px; padding: 4px 6px 4px 16px;
+  z-index: 2147483647; width: max-content; max-width: calc(100vw - 16px); min-height: 52px; padding: 4px 6px 4px 16px;
   display: flex; align-items: center; gap: 6px;
-  background: var(--surf); border: 1px solid var(--line); border-radius: 999px;
+  background: var(--surf); border: 1px solid var(--line); border-radius: 28px;
   box-shadow: 0 8px 28px rgba(0, 0, 0, .28);
 }
 .bar[hidden] { display: none; }
