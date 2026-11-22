@@ -323,9 +323,11 @@ test("reviewer link strips the token and shows the bar", async ({ page }) => {
   await expect(overlay(page).getByRole("link", { name: "Done" })).toHaveAttribute("href", /\/r\/#ttf=/);
 });
 
-test("the older ?ttf= link still works and is stripped too", async ({ page }) => {
+test("an older ?ttf= link is stripped but does not start reviewing", async ({ page }) => {
   await page.goto(`/index.html?keep=1&ttf=${encodeURIComponent(token())}#top`);
-  await expect(bar(page)).toContainText("Reviewing");
+  await page.waitForLoadState("load");
+  await page.waitForTimeout(500);
+  await expect(overlay(page)).toHaveCount(0);
   const url = new URL(page.url());
   expect(page.url()).not.toContain("ttf");
   expect(url.search + url.hash).toBe("?keep=1#top");
@@ -555,7 +557,7 @@ test("a Turbo-style body swap restarts the overlay for the new path", async ({ p
       page_y: 60,
     }),
   );
-  const res = await fetch(`${SERVICE}/api/me/comments`, { method: "POST", headers: { Authorization: `Bearer ${r.token}` }, body: form });
+  const res = await fetch(`${SERVICE}/api/me/comments`, { method: "POST", headers: { Authorization: `Bearer ${r.token}`, Origin: "http://localhost:4173" }, body: form });
   expect(res.status).toBe(201);
 
   await openAsReviewer(page, "/index.html", r.token);
@@ -610,7 +612,7 @@ test("tapping an existing pin opens the read sheet", async ({ page }) => {
   const post = async (data: object) => {
     const form = new FormData();
     form.append("data", JSON.stringify({ site: "fixture", path: "/index.html", device: "phone", viewport_w: 390, viewport_h: 844, ...data }));
-    const res = await fetch(`${SERVICE}/api/me/comments`, { method: "POST", headers: { Authorization: `Bearer ${r.token}` }, body: form });
+    const res = await fetch(`${SERVICE}/api/me/comments`, { method: "POST", headers: { Authorization: `Bearer ${r.token}`, Origin: "http://localhost:4173" }, body: form });
     expect(res.status).toBe(201);
     return ((await res.json()) as { id: string }).id;
   };

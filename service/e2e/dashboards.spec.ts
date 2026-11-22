@@ -31,7 +31,7 @@ async function reviewerWith(name: string, pages: { path: string; title: string }
 async function comment(token: string, path: string, body: string): Promise<string> {
   const form = new FormData();
   form.set("data", JSON.stringify({ site: "fixture", path, body }));
-  const res = await fetch(`${SERVICE}/api/me/comments`, { method: "POST", headers: { Authorization: `Bearer ${token}` }, body: form });
+  const res = await fetch(`${SERVICE}/api/me/comments`, { method: "POST", headers: { Authorization: `Bearer ${token}`, Origin: "http://localhost:4173" }, body: form });
   if (!res.ok) throw new Error(`comment → ${res.status}`);
   return ((await res.json()) as { id: string }).id;
 }

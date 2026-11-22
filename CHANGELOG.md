@@ -6,6 +6,11 @@ All notable changes to tap-to-fix are listed here. The format follows
 
 ## Unreleased
 
+### Security
+
+- Reviewer tokens in a `?ttf=` query string are refused; only the header and the `#ttf=` fragment count.
+- Saving a comment requires the site's `Origin` header.
+
 ### Added
 
 - MIT license.

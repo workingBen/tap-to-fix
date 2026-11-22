@@ -28,20 +28,12 @@ describe("loader boot", () => {
     expect(sessionStorage.length).toBe(0);
   });
 
-  it("query token (fallback): stored, stripped from the address bar, overlay loaded with config", async () => {
-    const { load, start } = setup("?ttf=abc&x=1#h");
-    expect(boot(document, window, load)).toBe(true);
-    expect(sessionStorage.getItem("ttf:token")).toBe("abc");
+  it("query token: stripped from the address bar but never used (the site's server already logged it)", () => {
+    const { load } = setup("?ttf=abc&x=1#h");
+    expect(boot(document, window, load)).toBe(false);
+    expect(sessionStorage.getItem("ttf:token")).toBeNull();
     expect(location.search + location.hash).toBe("?x=1#h");
-    expect(load).toHaveBeenCalledWith("https://svc.example.com/overlay.js");
-    await Promise.resolve();
-    await Promise.resolve();
-    expect(start).toHaveBeenCalledWith({
-      base: "https://svc.example.com",
-      site: "acme",
-      token: "abc",
-      dashboardUrl: "https://svc.example.com/r/#ttf=abc",
-    });
+    expect(load).not.toHaveBeenCalled();
   });
 
   it("fragment token: read from #ttf=, stripped, other hash and query parts kept", async () => {
@@ -105,7 +97,7 @@ describe("loader boot", () => {
   });
 
   it("works when storage throws, using the URL token for this page", () => {
-    const { load } = setup("?ttf=abc");
+    const { load } = setup("#ttf=abc");
     const spy = vi.spyOn(Storage.prototype, "setItem").mockImplementation(() => {
       throw new Error("denied");
     });
