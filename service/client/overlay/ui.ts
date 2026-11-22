@@ -216,6 +216,12 @@ export class OverlayUI {
     this.doc.getElementById(CURSOR_STYLE_ID)?.remove();
   }
 
+  /** Raises the pill so its bottom edge is `px` above the viewport bottom; null puts it back. */
+  liftBar(px: number | null): void {
+    if (px === null) this.root.style.removeProperty("--lift");
+    else this.root.style.setProperty("--lift", `${px}px`);
+  }
+
   setMode(m: Mode): void {
     this.hideCursor();
     this.mode = m;

@@ -18,7 +18,7 @@ svg { flex: none; }
 
 /* floating review pill, bottom center */
 .bar {
-  position: fixed; left: 50%; transform: translateX(-50%); bottom: calc(18px + env(safe-area-inset-bottom));
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: var(--lift, calc(18px + env(safe-area-inset-bottom)));
   z-index: 2147483647; width: max-content; max-width: calc(100vw - 16px); min-height: 52px; padding: 4px 6px 4px 16px;
   display: flex; align-items: center; gap: 6px;
   background: var(--surf); border: 1px solid var(--line); border-radius: 28px;
@@ -85,6 +85,15 @@ svg { flex: none; }
   .cur .ripple, .cur .cdot { animation: none; }
   .cur .ripple { transform: scale(1.6); opacity: .8; }
   .cur .ripple.r2 { display: none; }
+}
+
+/* Text zoom on a 375px phone leaves under 360 CSS px: drop the icons, keep the text size. */
+@media (max-width: 359px) {
+  .bar { padding-right: 2px; }
+  .bar .seg { padding: 2px; }
+  .root .bar .seg button { padding: 0 8px; }
+  .root .bar .seg button svg { display: none; }
+  .bar a { padding: 0 6px; }
 }
 
 /* pins: a zero-size layer in document coordinates */

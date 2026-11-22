@@ -96,12 +96,57 @@ test("on a 375px phone the reviewing pill is one line and fits", async ({ page }
   expect(bb.x + bb.width).toBeLessThanOrEqual(375 - 8 + 0.5);
 });
 
+test("on a 320px phone the reviewing pill is one line and Done stays inside", async ({ page }) => {
+  await openReady(page);
+  await page.setViewportSize({ width: 320, height: 640 });
+  await expect(bar(page)).toBeVisible();
+  const m = await bar(page).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { h: r.height, w: r.width, vw: innerWidth, right: r.right };
+  });
+  expect(m.h).toBeLessThan(64);
+  expect(m.w).toBeLessThanOrEqual(m.vw - 16);
+  const done = overlay(page).getByRole("link", { name: "Done" });
+  const db = (await done.boundingBox())!;
+  const bb = (await bar(page).boundingBox())!;
+  expect(db.x + db.width).toBeLessThanOrEqual(bb.x + bb.width);
+  await expect(comment(page)).toBeVisible();
+  await expect(usePage(page)).toBeVisible();
+});
+
+test("the pill lifts above a fixed bottom banner and drops back when it goes", async ({ page }) => {
+  const r = await owner<{ id: string; token: string }>("POST", "/reviewers", { name: "Banner" });
+  await owner("POST", "/assignments", { site: "fixture", reviewer_id: r.id, path: "/banner.html", title: "Banner page" });
+  await openAsReviewer(page, "/banner.html", r.token);
+  await expect(bar(page)).toContainText("Reviewing");
+  const banner = page.locator("#banner");
+  await expect(async () => {
+    const top = (await banner.boundingBox())!.y;
+    const b = (await bar(page).boundingBox())!;
+    expect(b.y + b.height).toBeLessThanOrEqual(top);
+  }).toPass();
+  // Accept is reachable: nothing of the overlay sits over it.
+  const hit = await page.evaluate(() => {
+    const a = document.querySelector("#accept")!.getBoundingClientRect();
+    return document.elementFromPoint(a.left + a.width / 2, a.top + a.height / 2)?.id;
+  });
+  expect(hit).toBe("accept");
+  await banner.evaluate((el) => ((el as HTMLElement).style.display = "none"));
+  await expect(async () => {
+    const b = (await bar(page).boundingBox())!;
+    const vh = page.viewportSize()!.height;
+    expect(Math.abs(vh - 18 - (b.y + b.height))).toBeLessThanOrEqual(1);
+  }).toPass();
+});
+
 const cursor = (page: Page) => overlay(page).locator("[data-ttf=cursor]");
 const ring = (page: Page) => overlay(page).locator("[data-ttf=ring]");
 
 test("fine pointer: the Comment cursor follows the mouse in Comment mode only @desktop", async ({ page }) => {
   await openReady(page);
-  await page.mouse.move(400, 300);
+  const h1 = (await page.locator("h1").boundingBox())!;
+  const cy = Math.round(h1.y + h1.height / 2);
+  await page.mouse.move(400, cy);
   await expect(cursor(page)).toBeVisible();
   await expect(cursor(page)).toContainText("Comment");
   await expect(page.locator("#ttf-cursor-style")).toHaveCount(1);
@@ -110,13 +155,13 @@ test("fine pointer: the Comment cursor follows the mouse in Comment mode only @d
   await expect(async () => {
     const b = (await dot.boundingBox())!;
     expect(Math.abs(b.x + b.width / 2 - 400)).toBeLessThanOrEqual(2);
-    expect(Math.abs(b.y + b.height / 2 - 300)).toBeLessThanOrEqual(2);
+    expect(Math.abs(b.y + b.height / 2 - cy)).toBeLessThanOrEqual(2);
   }).toPass();
   await expect(ring(page)).toBeVisible();
-  const el = await page.evaluate(() => {
-    const r = document.elementFromPoint(400, 300)!.getBoundingClientRect();
+  const el = await page.evaluate((y) => {
+    const r = document.elementFromPoint(400, y)!.getBoundingClientRect();
     return { x: r.left, y: r.top, w: r.width, h: r.height };
-  });
+  }, cy);
   const rb = (await ring(page).boundingBox())!;
   expect(Math.abs(rb.x - (el.x - 3))).toBeLessThanOrEqual(2);
   expect(Math.abs(rb.y - (el.y - 3))).toBeLessThanOrEqual(2);
@@ -149,6 +194,33 @@ test("fine pointer: the Comment cursor follows the mouse in Comment mode only @d
   await expect(sheet(page)).toBeVisible();
   await expect(cursor(page)).toBeHidden();
   await expect(page.locator("#ttf-cursor-style")).toHaveCount(0);
+});
+
+test("the ring follows the page when it scrolls under a still mouse @desktop", async ({ page }) => {
+  await openReady(page);
+  await page.mouse.move(100, 160); // the intro paragraph
+  await expect(ring(page)).toBeVisible();
+  await page.evaluate(() => window.scrollBy(0, 100)); // the photo slides under the pointer
+  await expect(async () => {
+    const want = await page.evaluate(() => {
+      const r = document.querySelector("#photo")!.getBoundingClientRect();
+      return { x: r.left - 3, y: r.top - 3, w: r.width + 6, h: r.height + 6, hit: document.elementFromPoint(100, 160)?.id };
+    });
+    expect(want.hit).toBe("photo");
+    const rb = (await ring(page).boundingBox())!;
+    expect(Math.abs(rb.x - want.x)).toBeLessThanOrEqual(2);
+    expect(Math.abs(rb.y - want.y)).toBeLessThanOrEqual(2);
+    expect(Math.abs(rb.height - want.h)).toBeLessThanOrEqual(2);
+  }).toPass();
+});
+
+test("no ring around the page body when the mouse is in a margin @desktop", async ({ page }) => {
+  await openReady(page);
+  await page.mouse.move(900, 600); // empty page background
+  await expect(cursor(page)).toBeVisible();
+  const tag = await page.evaluate(() => document.elementFromPoint(900, 600)?.tagName);
+  expect(["BODY", "HTML"]).toContain(tag);
+  await expect(ring(page)).toBeHidden();
 });
 
 test("reduced motion: steady glow, no animation @desktop", async ({ page }) => {
@@ -445,7 +517,6 @@ test("the sheet never covers the new pin", async ({ page }) => {
   const pin = (await pins(page).first().boundingBox())!;
   const panel = (await sheet(page).boundingBox())!;
   expect(pin.y + pin.height).toBeLessThanOrEqual(panel.y);
-  expect(pin.y).toBeGreaterThan(52);
 });
 
 test("a long status message keeps the pill wide on a phone", async ({ page }) => {

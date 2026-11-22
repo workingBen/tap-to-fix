@@ -280,11 +280,20 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     const fine = () => win.matchMedia("(hover: hover) and (pointer: fine)").matches;
     let moveAt: { x: number; y: number; target: Element | null } | null = null;
     let moveQueued = false;
+    let rehit = false;
+    // The page itself is never worth outlining; a margin hit means "nothing in particular".
+    const ringable = (t: Element | null): Element | null => (t && t !== doc.body && t !== doc.documentElement ? t : null);
     const paintCursor = () => {
       moveQueued = false;
       if (!alive || !moveAt) return;
+      if (rehit) {
+        // The page scrolled under a still mouse: whatever is under the pointer now gets the ring.
+        rehit = false;
+        const hit = doc.elementFromPoint(moveAt.x, moveAt.y);
+        moveAt.target = hit && hit !== ui.host && !ui.host.contains(hit) ? hit : null;
+      }
       if (mode !== "comment" || ui.sheetOpen) ui.hideCursor();
-      else ui.moveCursor(moveAt.x, moveAt.y, moveAt.target);
+      else ui.moveCursor(moveAt.x, moveAt.y, ringable(moveAt.target));
     };
     const queueCursor = () => {
       if (moveQueued) return;
@@ -318,7 +327,47 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     listen(doc, "keydown", onKey, capture);
     listen(doc, "pointermove", onPointerMove, { capture: true, passive: true });
     listen(doc.documentElement, "pointerleave", onPointerLeave);
-    listen(win, "scroll", () => moveAt && queueCursor(), { capture: true, passive: true });
+    listen(
+      win,
+      "scroll",
+      () => {
+        if (!moveAt) return;
+        rehit = true;
+        queueCursor();
+      },
+      { capture: true, passive: true },
+    );
+    // Sites with a fixed or sticky bar along the bottom edge (a cookie banner): sit above it.
+    const placeBar = () => {
+      if (!alive) return;
+      const x = win.innerWidth / 2;
+      const y = win.innerHeight - 4;
+      for (const hit of doc.elementsFromPoint(x, y)) {
+        if (hit === ui.host || ui.host.contains(hit)) continue;
+        for (let n: Element | null = hit; n; n = n.parentElement) {
+          const pos = win.getComputedStyle(n).position;
+          if (pos !== "fixed" && pos !== "sticky") continue;
+          const cs = win.getComputedStyle(n);
+          const r = n.getBoundingClientRect();
+          // Full-screen fixed backdrops start in the top half; they are not a bottom bar.
+          if (cs.visibility !== "hidden" && cs.opacity !== "0" && r.width > 0 && r.height > 0 && r.top > win.innerHeight * 0.5) {
+            ui.liftBar(win.innerHeight - r.top + 12);
+            return;
+          }
+        }
+      }
+      ui.liftBar(null);
+    };
+    let liftQueued = false;
+    const scheduleLift = () => {
+      if (liftQueued || !alive) return;
+      liftQueued = true;
+      requestAnimationFrame(() => {
+        liftQueued = false;
+        placeBar();
+      });
+    };
+    placeBar();
     // Coalesce bursts (resize, lazy images reflowing the page) into one layout per frame.
     let queued = false;
     const schedule = () => {
@@ -326,7 +375,10 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       queued = true;
       requestAnimationFrame(() => {
         queued = false;
-        if (alive) render();
+        if (alive) {
+          render();
+          placeBar();
+        }
       });
     };
     listen(win, "resize", schedule);
@@ -337,5 +389,9 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       ro.observe(doc.body);
       cleanup.push(() => ro.disconnect());
     }
+    // A banner that appears or hides later changes the page, not the window.
+    const mo = new MutationObserver(scheduleLift);
+    mo.observe(doc.body, { childList: true, attributes: true, subtree: true });
+    cleanup.push(() => mo.disconnect());
   }
 }
