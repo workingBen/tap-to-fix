@@ -32,8 +32,8 @@
       </div>
     </div>
     <div class="ph">
-      <div class="phone"><img src="assets/compose.jpg" width="585" height="1266" alt="The Tap to Fix comment box on a live page, on a phone: “What should change here? The heading ‘Virtual EMF Assessment’”, with a comment typed in and a Save comment button."></div>
-      <div class="note" aria-hidden="true"><small>NOTE 1</small>Heading could be bigger on phones</div>
+      <div class="phone"><img src="assets/pinned.jpg" width="585" height="1266" alt="A live page on a phone with a numbered pin on its “Book your assessment” button, and the Tap to Fix bar at the bottom: Comment, Use the page, Done."></div>
+      <div class="note" aria-hidden="true"><small>NOTE 1</small>Should this button be full width on mobile?</div>
     </div>
   </div>
 </header>
@@ -46,7 +46,7 @@
       <p class="intro">Reviewers need no account and nothing to install. Ordinary visitors to your site never see any of it.</p>
       <ol class="steps">
         <li>
-          <div class="phone"><img src="assets/compose.jpg" width="585" height="1266" loading="lazy" alt="A reviewer's comment box on the live page."></div>
+          <div class="phone"><img src="assets/compose.jpg" width="585" height="1266" loading="lazy" alt="A reviewer's comment box on the live page: “What should change here? The link ‘Book your assessment’”, with the comment “Should this button be full width on mobile?” typed in."></div>
           <h3>A reviewer taps</h3>
           <p>They open their private link, tap the spot that looks wrong and say what should change. A screenshot and the exact element come along.</p>
         </li>
@@ -82,15 +82,29 @@
   </section>
 
   <section class="band">
-    <div class="wrap story">
-      <div>
-        <p class="k">A real fix</p>
-        <h2>“Before you book” became an FAQ</h2>
-        <blockquote>This implies they have to read all these questions before they book, when I think of it more as a FAQ and optional if they want the extra info. Can we work on a new title together and make sure it looks good with a design review?
-          <cite>A comment tapped onto the Virtual EMF Assessment page at greensprings.life</cite></blockquote>
-        <p>Claude Code picked it up with <code>/tap-to-fix:fix</code>, ran a design review on the new heading, and shipped “Frequently asked questions” with a “Good to know” label. The comment showed as done on the reviewer's list.</p>
-      </div>
-      <div class="phone"><img src="assets/faq.jpg" width="585" height="1266" loading="lazy" alt="The live page after the fix: a “Good to know” label over the heading “Frequently asked questions”."></div>
+    <div class="wrap">
+      <p class="k">A real fix</p>
+      <h2>One question on a phone, one button fixed</h2>
+      <blockquote>Should this button be full width on mobile?
+        <cite>Tapped onto the “Book your assessment” button on the Virtual EMF Assessment page at greensprings.life</cite></blockquote>
+      <ol class="fix">
+        <li>
+          <div class="phone"><img src="assets/fix-before.jpg" width="585" height="1266" loading="lazy" alt="Before: on a phone, the “Book your assessment” and “What the hour covers” buttons fill only about half the width of the page."></div>
+          <h3>Before</h3>
+          <p>The buttons stop halfway across the phone.</p>
+        </li>
+        <li>
+          <div class="phone"><img src="assets/compose.jpg" width="585" height="1266" loading="lazy" alt="The comment: a pin on the “Book your assessment” button and the comment box below it, reading “What should change here? The link ‘Book your assessment’” with “Should this button be full width on mobile?” typed in."></div>
+          <h3>The comment</h3>
+          <p>Pinned on the button itself, so Claude Code knows exactly which one.</p>
+        </li>
+        <li>
+          <div class="phone"><img src="assets/fix-after.jpg" width="585" height="1266" loading="lazy" alt="After: the same spot on the page, with both buttons now spanning the full width of the phone."></div>
+          <h3>After</h3>
+          <p>Full width on phones, from the same scroll position.</p>
+        </li>
+      </ol>
+      <p class="intro">Claude Code picked it up with <code>/tap-to-fix:fix</code>, made the page's buttons full width on phones in one pull request, and the comment showed as done on the reviewer's list.</p>
     </div>
   </section>
 

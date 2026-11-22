@@ -12,7 +12,7 @@
 <p align="center"><b>Your reviewers tap the live site on their phone and say what to fix.<br>Claude Code fixes each comment and tells them when it's done.</b></p>
 
 <p align="center">
-  <img src="docs/assets/how-it-works.jpg" alt="Three steps on phones: 1, a reviewer taps a heading on the live page and types a comment; 2, the owner dashboard shows the command /tap-to-fix:fix alexis greensprings; 3, the reviewer's list shows the page as updated and done." width="100%">
+  <img src="docs/assets/how-it-works.jpg" alt="Three steps on phones: 1, a reviewer taps the “Book your assessment” button on the live page and asks “Should this button be full width on mobile?”; 2, the owner dashboard shows the command /tap-to-fix:fix alexis greensprings; 3, the reviewer's list shows the page as updated and done." width="100%">
 </p>
 
 <p align="center"><a href="https://workingben.github.io/tap-to-fix/"><b>See the site</b></a> · <a href="#quickstart"><b>Install</b></a></p>

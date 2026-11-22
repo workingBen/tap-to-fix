@@ -29,6 +29,7 @@ code, pre { font-family: var(--mono); }
 /* Hero: always dark green, like the link card. */
 .hero { background: radial-gradient(circle at 80% 20%, #2c5a44 0, var(--deep) 55%, #142821 100%); color: #fff; overflow: hidden; }
 .hero .wrap { display: grid; grid-template-columns: 1.1fr .9fr; gap: 40px; align-items: center; padding-top: 72px; padding-bottom: 80px; }
+.hero .wrap > * { min-width: 0; }
 .hero h1 { margin: 0; font: 800 clamp(56px, 8vw, 104px)/1 var(--sans); letter-spacing: -.04em; }
 .hero .sub { margin: 18px 0; font: 700 clamp(26px, 3vw, 38px)/1.2 var(--sans); }
 .hero .lede { margin: 0 0 28px; max-width: 540px; color: #C9DCD1; font-size: 19px; }
@@ -66,10 +67,12 @@ h2 { margin: 0 0 16px; font: 700 clamp(34px, 4.4vw, 52px)/1.1 var(--serif); }
 figcaption { margin-top: 12px; color: var(--mut); font-size: 16px; }
 figcaption b { color: var(--ink); }
 
-.story { display: grid; grid-template-columns: 1.2fr .8fr; gap: 48px; align-items: center; }
-blockquote { margin: 0 0 24px; padding: 22px 26px; border-left: 4px solid var(--orange); border-radius: 0 14px 14px 0; background: var(--surf); font-size: 20px; }
-blockquote cite { display: block; margin-top: 10px; color: var(--mut); font-size: 15px; font-style: normal; }
-.story .phone { max-width: 280px; margin: 0 auto; }
+blockquote { max-width: 760px; margin: 0 0 44px; padding: 22px 26px; border-left: 4px solid var(--orange); border-radius: 0 14px 14px 0; background: var(--surf); font: 700 24px/1.35 var(--sans); }
+blockquote cite { display: block; margin-top: 10px; color: var(--mut); font: 400 15px/1.5 var(--sans); font-style: normal; }
+.fix { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; margin: 0 0 36px; padding: 0; list-style: none; }
+.fix .phone { max-width: 280px; margin: 0 auto 18px; }
+.fix h3 { margin: 0 0 4px; font: 700 22px/1.3 var(--sans); }
+.fix p { margin: 0; color: var(--mut); }
 
 .install ol { max-width: 760px; padding-left: 1.2em; }
 .install li { margin-bottom: 14px; }
@@ -82,7 +85,8 @@ footer { padding: 40px 0 56px; border-top: 1px solid var(--line); color: var(--m
 footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: space-between; }
 
 @media (max-width: 860px) {
-  .hero .wrap, .story, .duo { grid-template-columns: 1fr; }
+  .hero .wrap, .duo { grid-template-columns: 1fr; }
+  .fix { grid-template-columns: 1fr; gap: 48px; }
   .hero .wrap { padding-top: 48px; padding-bottom: 64px; }
   .hero .ph { width: 240px; margin-top: 12px; }
   .note { left: -70px; top: 300px; width: 170px; font-size: 16px; }
@@ -93,4 +97,5 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
   body { font-size: 17px; }
   .wrap { padding: 0 16px; }
   .cmd { font-size: 13px; }
+  .note { left: -52px; width: 160px; }
 }
