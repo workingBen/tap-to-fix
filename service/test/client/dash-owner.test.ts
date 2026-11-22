@@ -25,6 +25,7 @@ function a(over: Partial<OwnerAssignment> = {}, counts: Partial<OwnerAssignment[
     site: "bonus-decade",
     path: "/sauna",
     title: "Sauna guide",
+    created_at: "2026-11-01T00:00:00.000Z",
     reviewer: { id: "r1", name: "Alexis Rivera" },
     status: "not_started",
     counts: { open: 0, in_progress: 0, settled: 0, ...counts },

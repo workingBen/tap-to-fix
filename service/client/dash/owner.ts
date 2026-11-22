@@ -13,6 +13,7 @@ export type OwnerAssignment = {
   site: string;
   path: string;
   title: string;
+  created_at: string;
   reviewer: { id: string; name: string };
   status: AssignmentStatus;
   counts: { open: number; in_progress: number; settled: number };
