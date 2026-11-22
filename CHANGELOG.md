@@ -8,6 +8,8 @@ All notable changes to tap-to-fix are listed here. The format follows
 
 ### Added
 
+- A project site at https://workingben.github.io/tap-to-fix/ (served from `docs/`) and a README that
+  opens with a banner, badges and the three steps as real screenshots.
 - Reviewer links show a picture card when texted or pasted (iMessage, Slack): "Tap to Fix · Your pages to review".
   `npm run deploy` makes the image URL absolute using the saved service URL.
 

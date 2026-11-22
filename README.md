@@ -1,3 +1,22 @@
+<p align="center">
+  <img src="docs/assets/banner.jpg" alt="Tap to Fix: tap any spot on the page, say what to fix." width="100%">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/Claude_Code-plugin-2F6B4F" alt="Claude Code plugin">
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/github/v/release/workingBen/tap-to-fix?color=1F2A24" alt="Latest release"></a>
+  <img src="https://img.shields.io/badge/license-MIT-5E655F" alt="MIT license">
+  <a href="https://github.com/workingBen/tap-to-fix/actions/workflows/test.yml"><img src="https://github.com/workingBen/tap-to-fix/actions/workflows/test.yml/badge.svg" alt="tests"></a>
+</p>
+
+<p align="center"><b>Your reviewers tap the live site on their phone and say what to fix.<br>Claude Code fixes each comment and tells them when it's done.</b></p>
+
+<p align="center">
+  <img src="docs/assets/how-it-works.jpg" alt="Three steps on phones: 1, a reviewer taps a heading on the live page and types a comment; 2, the owner dashboard shows the command /tap-to-fix:fix alexis greensprings; 3, the reviewer's list shows the page as updated and done." width="100%">
+</p>
+
+<p align="center"><a href="https://workingben.github.io/tap-to-fix/"><b>See the site</b></a> · <a href="#quickstart"><b>Install</b></a></p>
+
 # tap-to-fix
 
 tap-to-fix lets the people who review your website point at problems instead of describing them. A reviewer opens a private link on their phone, taps the spot that looks wrong, and types a comment. The comment lands in your own queue with a screenshot and the exact element they tapped. You then work through each reviewer's comments in Claude Code, and each comment's status goes back to the reviewer as you fix it. Reviewers need no account and nothing to install. Ordinary visitors to your site never see any of it.

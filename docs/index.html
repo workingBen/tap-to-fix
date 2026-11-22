@@ -1,0 +1,138 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tap to Fix: tap any spot on the page, say what to fix</title>
+<meta name="description" content="Reviewers tap your live site on their phone and say what to fix. Claude Code fixes each comment and tells them when it's done. A free, open-source Claude Code plugin.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Tap to Fix">
+<meta property="og:description" content="Tap any spot on the page. Say what to fix.">
+<meta property="og:image" content="https://workingben.github.io/tap-to-fix/assets/social-card.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div>
+      <h1>Tap to Fix</h1>
+      <p class="sub">Tap any spot on the page.<br>Say what to fix.</p>
+      <p class="lede">Your reviewers comment on the live site from their phone. Claude Code fixes each comment in a review cycle and tells them when it's done.</p>
+      <pre class="cmd"><b>/plugin</b> marketplace add workingBen/proofs
+<b>/plugin</b> install proofs@proofs
+<b>/plugin</b> marketplace add workingBen/tap-to-fix
+<b>/plugin</b> install tap-to-fix@tap-to-fix</pre>
+      <div class="acts">
+        <a class="btn" href="#install">Get started</a>
+        <a class="ghost" href="https://github.com/workingBen/tap-to-fix">View on GitHub</a>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="phone"><img src="assets/compose.jpg" width="585" height="1266" alt="The Tap to Fix comment box on a live page, on a phone: “What should change here? The heading ‘Virtual EMF Assessment’”, with a comment typed in and a Save comment button."></div>
+      <div class="note" aria-hidden="true"><small>NOTE 1</small>Heading could be bigger on phones</div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="band" id="how">
+    <div class="wrap">
+      <p class="k">How it works</p>
+      <h2>From a tap to a fix</h2>
+      <p class="intro">Reviewers need no account and nothing to install. Ordinary visitors to your site never see any of it.</p>
+      <ol class="steps">
+        <li>
+          <div class="phone"><img src="assets/compose.jpg" width="585" height="1266" loading="lazy" alt="A reviewer's comment box on the live page."></div>
+          <h3>A reviewer taps</h3>
+          <p>They open their private link, tap the spot that looks wrong and say what should change. A screenshot and the exact element come along.</p>
+        </li>
+        <li>
+          <div class="phone"><img src="assets/odash.jpg" width="585" height="1266" loading="lazy" alt="The owner dashboard showing “4 comments ready to fix on Greensprings Longevity” and the command /tap-to-fix:fix alexis greensprings with a Copy button."></div>
+          <h3>You run one command</h3>
+          <p>Your dashboard shows who has comments waiting and the command to run. In Claude Code, <code>/tap-to-fix:fix</code> works through them as a review cycle, one pull request per fix.</p>
+        </li>
+        <li>
+          <div class="phone"><img src="assets/rdash.jpg" width="585" height="1266" loading="lazy" alt="The reviewer's list of pages, with “Updated since you looked” and “All done” labels."></div>
+          <h3>They see it done</h3>
+          <p>Each comment's status goes back to the reviewer as it's fixed, so they know what changed without asking.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <p class="k">Two dashboards</p>
+      <h2>One for you, one for them</h2>
+      <div class="duo">
+        <figure>
+          <img src="assets/owner-dashboard.jpg" width="1440" height="900" loading="lazy" alt="The owner dashboard: one column per reviewer, with their pages, open comments, pull request links and the command to run.">
+          <figcaption><b>Yours:</b> every reviewer, their pages, what's open, and the command to run. Copy or text a reviewer their link from here.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/reviewer-dashboard.jpg" width="1440" height="900" loading="lazy" alt="The reviewer's page list: pages grouped by site, each with its comment count and status.">
+          <figcaption><b>Theirs:</b> the pages to review, grouped by site, with what's being fixed and what's done.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap story">
+      <div>
+        <p class="k">A real fix</p>
+        <h2>“Before you book” became an FAQ</h2>
+        <blockquote>This implies they have to read all these questions before they book, when I think of it more as a FAQ and optional if they want the extra info. Can we work on a new title together and make sure it looks good with a design review?
+          <cite>A comment tapped onto the Virtual EMF Assessment page at greensprings.life</cite></blockquote>
+        <p>Claude Code picked it up with <code>/tap-to-fix:fix</code>, ran a design review on the new heading, and shipped “Frequently asked questions” with a “Good to know” label. The comment showed as done on the reviewer's list.</p>
+      </div>
+      <div class="phone"><img src="assets/faq.jpg" width="585" height="1266" loading="lazy" alt="The live page after the fix: a “Good to know” label over the heading “Frequently asked questions”."></div>
+    </div>
+  </section>
+
+  <section class="band install" id="install">
+    <div class="wrap">
+      <p class="k">Install</p>
+      <h2>Set it up in a few minutes</h2>
+      <p class="intro">You need Claude Code, Node 22 and a free Cloudflare account. Everything runs on your own account.</p>
+      <ol>
+        <li><b>Install the plugins</b> in Claude Code. Tap to Fix uses <a href="https://github.com/workingBen/proofs">Proofs</a> for its review cycle.
+<pre class="cmd"><b>/plugin</b> marketplace add workingBen/proofs
+<b>/plugin</b> install proofs@proofs
+<b>/plugin</b> marketplace add workingBen/tap-to-fix
+<b>/plugin</b> install tap-to-fix@tap-to-fix</pre></li>
+        <li><b>Deploy your own service</b> with <code>/tap-to-fix:setup</code>. It creates one database, one storage bucket and one Worker on your Cloudflare account, and gives you a script tag and your owner link.</li>
+        <li><b>Add the script tag</b> to your site's pages. Visitors see nothing; only someone with a reviewer link does.</li>
+        <li><b>Add a reviewer</b> on your dashboard, assign them pages, and text them their link.</li>
+      </ol>
+      <p>The <a href="https://github.com/workingBen/tap-to-fix#quickstart">full quickstart</a> covers content security policies and every option.</p>
+    </div>
+  </section>
+
+  <section class="band data">
+    <div class="wrap">
+      <p class="k">Your data</p>
+      <h2>It stays on your account</h2>
+      <ul>
+        <li><b>No hosted service.</b> Comments, screenshots and reviewers live in your own Cloudflare database and bucket.</li>
+        <li><b>Screenshots have no public address.</b> Only you and the reviewer who took one can see it.</li>
+        <li><b>Reviewer links keep their key after the <code>#</code></b>, which browsers never send to your site's server or logs.</li>
+        <li><b>Limits on every write:</b> comment size, screenshot size, and how many comments a reviewer can save a minute and a day. <a href="https://github.com/workingBen/tap-to-fix/blob/main/SECURITY.md">SECURITY.md</a> lists them all.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Tap to Fix is free and open source (MIT). Built for <a href="https://greensprings.life">Greensprings Longevity</a>.</span>
+    <span><a href="https://github.com/workingBen/tap-to-fix">GitHub</a> · <a href="https://github.com/workingBen/proofs">Proofs</a></span>
+  </div>
+</footer>
+
+</body>
+</html>
