@@ -2,8 +2,11 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   countsText,
+  filterCandidates,
   fixCommand,
   mountOwner,
+  pageCandidates,
+  relativeDay,
   prLabel,
   readyBatches,
   removeConfirm,
@@ -146,15 +149,14 @@ describe("renderOwner", () => {
     expect(html).toContain("Add a site first. The form is under Sites, below.");
     expect(html).not.toContain('data-action="assign"');
   });
-  it("the assign button opens a form for that reviewer only (stub until the panel lands)", () => {
+  it("the old inline assign form is gone; assignFor opens the one Assign pages panel", () => {
     const ben = { ...ALEXIS, id: "r2", name: "Ben Pellow" };
     const s = state({ overview: { reviewers: [ALEXIS, ben], assignments: [] } });
-    expect(renderOwner(s)).not.toContain('data-form="assign"');
+    expect(renderOwner(s)).not.toContain("data-assign-panel");
     const box = document.createElement("div");
     box.innerHTML = renderOwner({ ...s, assignFor: "r2" });
-    expect(box.querySelectorAll("form[data-form=assign]")).toHaveLength(1);
-    const form = box.querySelector("[data-person=r2] form[data-form=assign]")!;
-    expect((form.querySelector("input[name=reviewer_id]") as HTMLInputElement).value).toBe("r2");
+    expect(box.querySelector("form[data-form=assign]")).toBeNull();
+    expect(box.querySelectorAll("[data-assign-panel]")).toHaveLength(1);
   });
   it("escapes names and titles", () => {
     const html = renderOwner(
@@ -331,6 +333,175 @@ describe("one column per reviewer", () => {
   });
 });
 
+describe("assign pages panel", () => {
+  const NOW = new Date(2026, 10, 21, 15, 0);
+  /** A local time `days` calendar days before NOW, at `hour`:00. */
+  const at = (days: number, hour = 9) => new Date(2026, 10, 21 - days, hour, 0).toISOString();
+  const ben = { id: "r2", name: "Ben Pellow" };
+  const BEN = { id: "r2", name: "Ben Pellow", revoked: false, unsettled_count: 0, ready_count: 0 };
+  const THREE: Site[] = [...SITES, { slug: "alexis-art", name: "Alexis Art", origin: "https://art.greensprings.life", repo: "workingBen/art" }];
+  const overview: Overview = {
+    reviewers: [ALEXIS, BEN],
+    assignments: [
+      a({ id: "p6", title: "Gallery", site: "alexis-art", path: "/gallery", created_at: at(0, 10) }),
+      a({ id: "p5", title: "Home page", site: "bonus-decade", path: "/", reviewer: ben, created_at: at(0, 9) }),
+      a({ id: "p4", title: "Gifts buying club", site: "greensprings", path: "/gifts", reviewer: ben, created_at: at(1) }),
+      a({ id: "p3", title: "Sauna protocol", site: "bonus-decade", path: "/protocols/sauna", created_at: at(2) }),
+      a({ id: "p2", title: "Digital Detox Retreat", site: "greensprings", path: "/digital-detox", created_at: at(3, 11) }),
+      a({ id: "p1", title: "Virtual EMF Assessment", site: "greensprings", path: "/virtual-emf-assessment", created_at: at(3, 10) }),
+    ],
+  };
+
+  describe("pageCandidates", () => {
+    it("lists pages the reviewer does not have, newest first, and the rest as already", () => {
+      const { candidates, already } = pageCandidates(overview, "r2");
+      expect(candidates.map((c) => c.title)).toEqual(["Gallery", "Sauna protocol", "Digital Detox Retreat", "Virtual EMF Assessment"]);
+      expect(candidates[0]).toEqual({ site: "alexis-art", path: "/gallery", title: "Gallery", lastAssignedTo: ["Alexis"], lastAssignedAt: at(0, 10) });
+      expect(already.map((x) => x.title)).toEqual(["Home page", "Gifts buying club"]);
+    });
+    it("dedupes a page two reviewers have, most recent first, with the newest title", () => {
+      const shawn = { id: "r3", name: "Shawn Smith" };
+      const both: Overview = {
+        reviewers: [ALEXIS, BEN, { ...BEN, id: "r3", name: "Shawn Smith" }],
+        assignments: [
+          a({ id: "n2", title: "Sauna (new title)", path: "/sauna", reviewer: ben, created_at: at(0) }),
+          a({ id: "n3", title: "Other", path: "/other", reviewer: shawn, created_at: at(1) }),
+          a({ id: "n1", title: "Sauna", path: "/sauna", created_at: at(2) }),
+        ],
+      };
+      const { candidates, already } = pageCandidates(both, "r3");
+      expect(candidates).toEqual([
+        { site: "bonus-decade", path: "/sauna", title: "Sauna (new title)", lastAssignedTo: ["Ben", "Alexis"], lastAssignedAt: at(0) },
+      ]);
+      expect(already.map((x) => x.id)).toEqual(["n3"]);
+    });
+    it("sorts by the latest assignment even when the overview is not in order", () => {
+      const shuffled = { ...overview, assignments: [...overview.assignments].reverse() };
+      expect(pageCandidates(shuffled, "r2").candidates.map((c) => c.path)).toEqual([
+        "/gallery",
+        "/protocols/sauna",
+        "/digital-detox",
+        "/virtual-emf-assessment",
+      ]);
+    });
+  });
+
+  describe("filterCandidates", () => {
+    const list = pageCandidates(overview, "r2").candidates;
+    it("matches the title, ignoring case", () => {
+      expect(filterCandidates(list, "DET", THREE).map((c) => c.title)).toEqual(["Digital Detox Retreat"]);
+    });
+    it("matches the path", () => {
+      expect(filterCandidates(list, "/protocols", THREE).map((c) => c.title)).toEqual(["Sauna protocol"]);
+      const forAlexis = pageCandidates(overview, "r1").candidates;
+      expect(filterCandidates(forAlexis, "/gifts", THREE).map((c) => c.title)).toEqual(["Gifts buying club"]);
+    });
+    it("matches the site name", () => {
+      expect(filterCandidates(list, "alexis art", THREE).map((c) => c.title)).toEqual(["Gallery"]);
+    });
+    it("a blank query returns the list unchanged", () => {
+      expect(filterCandidates(list, "   ", THREE)).toBe(list);
+    });
+  });
+
+  describe("relativeDay", () => {
+    it("today, yesterday and N days ago, by local calendar day", () => {
+      expect(relativeDay(new Date(2026, 10, 21, 0, 5).toISOString(), NOW)).toBe("today");
+      expect(relativeDay(new Date(2026, 10, 20, 23, 55).toISOString(), NOW)).toBe("yesterday");
+      expect(relativeDay(new Date(2026, 10, 18, 9).toISOString(), NOW)).toBe("3 days ago");
+    });
+  });
+
+  describe("panel render", () => {
+    const render = (assign: Partial<NonNullable<OwnerState["assign"]>> = {}) => {
+      const box = document.createElement("div");
+      box.innerHTML = renderOwner(
+        state({
+          sites: THREE,
+          overview,
+          assignFor: "r2",
+          assign: { opener: "r2", picked: [], query: "", manualOpen: false, manual: { site: "", path: "", title: "" }, error: null, busy: false, ...assign },
+        }),
+        NOW,
+      );
+      return box.querySelector("[data-assign-panel]") as HTMLElement;
+    };
+    const submit = (p: HTMLElement) => p.querySelector("[data-action=assign-submit]") as HTMLButtonElement;
+
+    it("is a labeled modal dialog headed Assign pages", () => {
+      const p = render();
+      const dialog = p.querySelector("[role=dialog]")!;
+      expect(dialog.getAttribute("aria-modal")).toBe("true");
+      const heading = p.querySelector(`#${dialog.getAttribute("aria-labelledby")}`)!;
+      expect(heading.textContent).toBe("Assign pages");
+      expect(p.querySelector("[data-action=assign-close]")!.getAttribute("aria-label")).toBe("Close");
+    });
+    it("the To control presses the chosen reviewer", () => {
+      const seg = [...render().querySelectorAll("[data-action=assign-to]")];
+      expect(seg.map((b) => [b.textContent, b.getAttribute("aria-pressed")])).toEqual([
+        ["Alexis", "false"],
+        ["Ben", "true"],
+      ]);
+    });
+    it("has a search box labeled Find a page and the Most recently assigned list", () => {
+      const p = render();
+      const search = p.querySelector("input[type=search]") as HTMLInputElement;
+      expect(search.getAttribute("aria-label")).toBe("Find a page");
+      expect(search.placeholder).toBe("Find a page");
+      expect(p.querySelector(".sub-h")!.textContent).toBe("Most recently assigned");
+    });
+    it("one checkbox row per candidate, with site, path and who has it", () => {
+      const rows = [...render({ picked: ["alexis-art|/gallery"] }).querySelectorAll(".pick")];
+      expect(rows.map((r) => r.querySelector(".tt")!.textContent)).toEqual([
+        "Gallery",
+        "Sauna protocol",
+        "Digital Detox Retreat",
+        "Virtual EMF Assessment",
+      ]);
+      const [first, second, third] = rows;
+      expect(first.querySelector("input[type=checkbox]")!.hasAttribute("checked")).toBe(true);
+      expect(second.querySelector("input[type=checkbox]")!.hasAttribute("checked")).toBe(false);
+      const lines = (r: Element) => [...r.querySelectorAll(".tu")].map((t) => t.textContent);
+      expect(lines(first)).toEqual(["Alexis Art /gallery", "Assigned to Alexis · today"]);
+      expect(lines(second)[1]).toBe("Assigned to Alexis · 2 days ago");
+      expect(lines(third)[1]).toBe("Assigned to Alexis · 3 days ago");
+    });
+    it("says which pages the reviewer already has", () => {
+      expect(render().querySelector(".already")!.textContent).toBe("Already on Ben's list: Home page, Gifts buying club");
+    });
+    it("offers A page that isn't listed", () => {
+      const btn = render().querySelector("[data-action=assign-manual]")!;
+      expect(btn.textContent).toBe("A page that isn't listed");
+      expect(btn.getAttribute("aria-expanded")).toBe("false");
+    });
+    it("the submit counts the chosen pages and is disabled with none", () => {
+      expect(submit(render()).textContent).toBe("Assign pages to Ben");
+      expect(submit(render()).disabled).toBe(true);
+      expect(submit(render({ picked: ["alexis-art|/gallery"] })).textContent).toBe("Assign 1 page to Ben");
+      const two = submit(render({ picked: ["alexis-art|/gallery", "bonus-decade|/protocols/sauna"] }));
+      expect(two.textContent).toBe("Assign 2 pages to Ben");
+      expect(two.disabled).toBe(false);
+    });
+    it("a filled page that isn't listed counts as one more", () => {
+      const p = render({ picked: ["alexis-art|/gallery"], manualOpen: true, manual: { site: "greensprings", path: "/faq", title: "FAQ" } });
+      expect(submit(p).textContent).toBe("Assign 2 pages to Ben");
+      expect(p.querySelector("[data-action=assign-manual]")!.getAttribute("aria-expanded")).toBe("true");
+      const manual = p.querySelector("[data-manual]")!;
+      expect((manual.querySelector("select[name=site]") as HTMLSelectElement).value).toBe("greensprings");
+      expect((manual.querySelector("input[name=path]") as HTMLInputElement).value).toBe("/faq");
+      expect((manual.querySelector("input[name=title]") as HTMLInputElement).value).toBe("FAQ");
+    });
+    it("the search keeps its text and narrows the list", () => {
+      const p = render({ query: "det" });
+      expect((p.querySelector("input[type=search]") as HTMLInputElement).value).toBe("det");
+      expect([...p.querySelectorAll(".pick .tt")].map((t) => t.textContent)).toEqual(["Digital Detox Retreat"]);
+    });
+    it("shows a saved error line", () => {
+      expect(render({ error: "Not found" }).querySelector("[data-error]")!.textContent).toBe("Not found");
+    });
+  });
+});
+
 describe("mountOwner", () => {
   beforeEach(() => {
     document.body.innerHTML = '<div id="app"></div>';
@@ -417,6 +588,154 @@ describe("mountOwner", () => {
     expect(call.auth).toBe("Bearer tok");
     expect(created).toHaveBeenCalled();
     click.mockRestore();
+  });
+  describe("the assign panel", () => {
+    const BEN = { id: "r2", name: "Ben Pellow", revoked: false, unsettled_count: 0, ready_count: 0 };
+    const ben = { id: "r2", name: "Ben Pellow" };
+    let assignments: OwnerAssignment[];
+    let posts: Record<string, string>[];
+    let failPaths: Set<string>;
+    beforeEach(() => {
+      history.replaceState(null, "", "/o/#owner=tok");
+      assignments = [
+        a({ id: "p3", title: "Gallery", site: "greensprings", path: "/gallery", created_at: "2026-11-21T10:00:00.000Z" }),
+        a({ id: "p2", title: "Home page", site: "bonus-decade", path: "/", reviewer: ben, created_at: "2026-11-20T10:00:00.000Z" }),
+        a({ id: "p1", title: "Sauna protocol", site: "bonus-decade", path: "/protocols/sauna", created_at: "2026-11-19T10:00:00.000Z" }),
+      ];
+      posts = [];
+      failPaths = new Set();
+      let n = 0;
+      vi.stubGlobal(
+        "fetch",
+        vi.fn(async (path: string, init?: RequestInit) => {
+          if (path === "/api/owner/assignments" && init?.method === "POST") {
+            const body = JSON.parse(String(init.body)) as Record<string, string>;
+            posts.push(body);
+            if (failPaths.has(body.path)) return new Response('{"error":"Not found"}', { status: 404 });
+            const r = body.reviewer_id === "r2" ? ben : { id: "r1", name: "Alexis Rivera" };
+            assignments.unshift(a({ id: `new${++n}`, site: body.site, path: body.path, title: body.title, reviewer: r, created_at: `2026-11-22T00:00:0${n}.000Z` }));
+            return new Response(JSON.stringify({ id: `new${n}` }), { status: 201 });
+          }
+          if (path.endsWith("/sites")) return new Response(JSON.stringify(SITES), { status: 200 });
+          return new Response(JSON.stringify({ reviewers: [ALEXIS, BEN], assignments }), { status: 200 });
+        }),
+      );
+    });
+    const panel = () => document.querySelector("[data-assign-panel]") as HTMLElement | null;
+    const box = (path: string) => panel()!.querySelector(`input[type=checkbox][data-key$="|${path}"]`) as HTMLInputElement;
+    const tick = (path: string) => {
+      const cb = box(path);
+      cb.checked = !cb.checked;
+      cb.dispatchEvent(new Event("change", { bubbles: true }));
+    };
+    const submit = () => panel()!.querySelector("[data-action=assign-submit]") as HTMLButtonElement;
+    const openFor = (id: string) => (document.querySelector(`[data-person=${id}] [data-action=assign]`) as HTMLButtonElement).click();
+
+    it("opens preset to the column's reviewer and closes with Escape, focus back on the opener", async () => {
+      await mountOwner(window);
+      openFor("r2");
+      expect(panel()).not.toBeNull();
+      expect(panel()!.querySelector("[aria-pressed=true]")!.textContent).toBe("Ben");
+      document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true }));
+      expect(panel()).toBeNull();
+      expect(document.activeElement).toBe(document.querySelector("[data-person=r2] [data-action=assign]"));
+    });
+    it("the X closes it too", async () => {
+      await mountOwner(window);
+      openFor("r1");
+      (panel()!.querySelector("[data-action=assign-close]") as HTMLButtonElement).click();
+      expect(panel()).toBeNull();
+      expect(document.activeElement).toBe(document.querySelector("[data-person=r1] [data-action=assign]"));
+    });
+    it("ticks survive a search and a reviewer switch; the switch drops pages that reviewer has", async () => {
+      await mountOwner(window);
+      openFor("r2");
+      tick("/gallery");
+      tick("/protocols/sauna");
+      expect(submit().textContent).toBe("Assign 2 pages to Ben");
+      const search = panel()!.querySelector("input[type=search]") as HTMLInputElement;
+      search.value = "gall";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      expect([...panel()!.querySelectorAll(".pick .tt")].map((t) => t.textContent)).toEqual(["Gallery"]);
+      expect(submit().textContent).toBe("Assign 2 pages to Ben");
+      search.value = "";
+      search.dispatchEvent(new Event("input", { bubbles: true }));
+      expect(box("/protocols/sauna").checked).toBe(true);
+      // Switch to Alexis: she already has Gallery and Sauna, so both ticks go.
+      (panel()!.querySelector("[data-action=assign-to][data-id=r1]") as HTMLButtonElement).click();
+      expect(submit().textContent).toBe("Assign pages to Alexis");
+      expect(box("/")).not.toBeNull();
+      tick("/");
+      (panel()!.querySelector("[data-action=assign-to][data-id=r2]") as HTMLButtonElement).click();
+      // Ben has Home page, so that tick goes too.
+      expect(submit().textContent).toBe("Assign pages to Ben");
+    });
+    it("the search's blur-time change event leaves the list alone, so a tap on a row lands", async () => {
+      await mountOwner(window);
+      openFor("r2");
+      const row = box("/gallery");
+      const search = panel()!.querySelector("input[type=search]") as HTMLInputElement;
+      search.value = "zzz";
+      search.dispatchEvent(new Event("change", { bubbles: true }));
+      expect(box("/gallery")).toBe(row);
+    });
+    it("posts each page in turn, then closes and shows the new rows in the column", async () => {
+      await mountOwner(window);
+      openFor("r2");
+      tick("/gallery");
+      tick("/protocols/sauna");
+      submit().click();
+      await vi.waitFor(() => expect(panel()).toBeNull());
+      expect(posts).toEqual([
+        { site: "bonus-decade", reviewer_id: "r2", path: "/protocols/sauna", title: "Sauna protocol" },
+        { site: "greensprings", reviewer_id: "r2", path: "/gallery", title: "Gallery" },
+      ]);
+      const titles = [...document.querySelectorAll("[data-person=r2] [data-row] .tt")].map((t) => t.textContent);
+      expect(titles).toEqual(["Gallery", "Sauna protocol", "Home page"]);
+      expect(document.activeElement).toBe(document.querySelector("[data-person=r2] [data-action=assign]"));
+    });
+    it("a failure keeps the panel open with the failed page ticked and the error shown", async () => {
+      failPaths.add("/gallery");
+      await mountOwner(window);
+      openFor("r2");
+      tick("/gallery");
+      tick("/protocols/sauna");
+      submit().click();
+      await vi.waitFor(() => expect(panel()!.querySelector("[data-error]")?.textContent).toContain("Not found"));
+      expect(box("/gallery").checked).toBe(true);
+      expect(box("/protocols/sauna")).toBeNull(); // Ben has it now
+      expect(submit().textContent).toBe("Assign 1 page to Ben");
+      expect([...document.querySelectorAll("[data-person=r2] [data-row] .tt")].map((t) => t.textContent)).toContain("Sauna protocol");
+    });
+    it("a page that isn't listed is posted from the Site, Path and Title fields", async () => {
+      await mountOwner(window);
+      openFor("r1");
+      (panel()!.querySelector("[data-action=assign-manual]") as HTMLButtonElement).click();
+      const m = panel()!.querySelector("[data-manual]")!;
+      const set = (sel: string, v: string) => {
+        const el = m.querySelector(sel) as HTMLInputElement | HTMLSelectElement;
+        el.value = v;
+        el.dispatchEvent(new Event("input", { bubbles: true }));
+      };
+      set("select[name=site]", "greensprings");
+      set("input[name=path]", "/faq");
+      expect(submit().textContent).toBe("Assign 1 page to Alexis");
+      set("input[name=title]", "FAQ");
+      submit().click();
+      await vi.waitFor(() => expect(panel()).toBeNull());
+      expect(posts).toEqual([{ site: "greensprings", reviewer_id: "r1", path: "/faq", title: "FAQ" }]);
+    });
+    it("a page that isn't listed with no title says so and posts nothing", async () => {
+      await mountOwner(window);
+      openFor("r1");
+      (panel()!.querySelector("[data-action=assign-manual]") as HTMLButtonElement).click();
+      const path = panel()!.querySelector("[data-manual] input[name=path]") as HTMLInputElement;
+      path.value = "/faq";
+      path.dispatchEvent(new Event("input", { bubbles: true }));
+      submit().click();
+      expect(panel()!.querySelector("[data-error]")!.textContent).toBe("Fill in the Path and the Title for the page that isn't listed.");
+      expect(posts).toEqual([]);
+    });
   });
   it("takes the token out of the address bar once stored", async () => {
     history.replaceState(null, "", "/o/#owner=tok");

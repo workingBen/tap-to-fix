@@ -85,12 +85,42 @@ try {
     await page.screenshot({ path: join(out, name), fullPage: true });
 
     if (!mobile && viewport.width === 1440) {
-      // The more menu open, and the stand-in assign form.
+      // The more menu open.
       await page.locator("[data-person] details.more > summary").first().click();
       await page.screenshot({ path: join(out, "o-menu-1440.png") });
       await page.locator("[data-person] details.more > summary").first().click();
-      await page.locator("[data-person] [data-action=assign]").nth(1).click();
-      await page.screenshot({ path: join(out, "o-assign-1440.png"), fullPage: true });
+    }
+    if (viewport.width === 1440 || viewport.width === 390) {
+      // The Assign pages panel, open for Ben with two pages ticked (as in 2-assign-A).
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.getByRole("button", { name: "Assign a page to Ben" }).click();
+      const panel = page.getByRole("dialog", { name: "Assign pages" });
+      await panel.locator(".pick", { hasText: "Gallery" }).click();
+      await panel.locator(".pick", { hasText: "Sauna protocol" }).click();
+      await panel.getByRole("button", { name: "Assign 2 pages to Ben" }).waitFor();
+      await panel.locator(".already").waitFor();
+      const w = viewport.width;
+      const overflow = await panel.evaluate((el) => el.scrollWidth > el.clientWidth);
+      if (overflow) console.warn(`assign-${w}: horizontal overflow inside the panel`);
+      // A phone panel scrolls inside itself; grow the viewport to its height so one shot shows it all.
+      const fit = async () => {
+        const h = await panel.evaluate((el) => el.scrollHeight);
+        if (mobile) await page.setViewportSize({ width: w, height: Math.max(viewport.height, h) });
+      };
+      await fit();
+      await page.locator("#assign-h").focus(); // as on open; keeps focus rings out of the shot
+      await page.screenshot({ path: join(out, `assign-${w}.png`) });
+      if (mobile) {
+        await panel.getByRole("button", { name: "A page that isn't listed" }).click();
+        await panel.getByLabel("Path", { exact: true }).fill("/detox-faq");
+        await panel.getByLabel("Title", { exact: true }).fill("Detox FAQ");
+        await fit();
+        await page.locator("#assign-h").focus();
+        await page.mouse.move(1, 1); // no leftover hover tint on the toggle
+        await page.screenshot({ path: join(out, `assign-${w}-manual.png`) });
+        await page.setViewportSize(viewport);
+      }
+      await page.keyboard.press("Escape");
     }
     if (mobile) {
       // The more menu open on a phone: it must not clip at the right edge.
