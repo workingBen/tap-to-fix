@@ -20,11 +20,12 @@ export type OwnerAssignment = {
   pr_urls: string[];
 };
 export type Overview = { reviewers: OwnerReviewer[]; assignments: OwnerAssignment[] };
-export type Flash = { kind: "link"; name: string; url: string };
+export type Flash = { kind: "link"; id: string; name: string; url: string };
 export type OwnerState = {
   sites: Site[];
   overview: Overview;
-  selectedReviewerId: string | null;
+  /** The reviewer the assign panel is open for; null when it is closed. */
+  assignFor: string | null;
   flash: Flash | null;
 };
 export type ReadyBatch = { reviewerId: string; reviewerName: string; siteSlug: string; siteName: string; open: number; command: string };
@@ -125,6 +126,8 @@ const CLOSE = svg('<path d="M6 6l12 12M18 6L6 18"/>');
 const COPY = svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>', 18);
 const DOWNLOAD = svg('<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>', 18);
 const OUT = svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>', 17);
+const LINK = svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>', 18);
+const MORE = svg('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>');
 const PR = svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4M13 3.5L10.5 6 13 8.5"/>', 17);
 
 const copyButton = (text: string) =>
@@ -142,37 +145,36 @@ function adder(form: string, label: string, body: string, open: boolean): string
   );
 }
 
-/** First name, or the full name when another reviewer shares it. */
-function headingName(b: ReadyBatch, all: { id: string; name: string }[]): string {
-  const first = firstName(b.reviewerName).toLowerCase();
-  const shared = all.some((x) => x.id !== b.reviewerId && firstName(x.name).toLowerCase() === first);
-  return shared ? b.reviewerName.trim() : firstName(b.reviewerName);
+/** The comment counts for one page: the open count in bold, zeros left out. */
+export function countsText(a: OwnerAssignment): string {
+  const { open, in_progress, settled } = a.counts;
+  const parts = [open ? `<b>${open} open</b>` : "", in_progress ? `${in_progress} in progress` : "", settled ? `${settled} settled` : ""];
+  return parts.filter(Boolean).join(" · ") || "No comments yet";
 }
 
-function readyHtml(batches: ReadyBatch[], reviewers: { id: string; name: string }[]): string {
-  if (batches.length === 0) return "";
+/** The origin without its scheme ("https://greensprings.life" → "greensprings.life"). */
+function hostOf(origin: string): string {
+  try {
+    return new URL(origin).host;
+  } catch {
+    return origin.replace(/^[a-z]+:\/\//i, "");
+  }
+}
+
+function initial(name: string): string {
+  return esc(firstName(name).slice(0, 1).toUpperCase()) || "?";
+}
+
+function commandHtml(command: string): string {
   return (
-    `<section class="ready-wrap" aria-label="Ready for a review cycle">` +
-    batches
-      .map(
-        (b) =>
-          `<div class="ready" data-ready>` +
-          `<p class="ready-h">${esc(headingName(b, reviewers))} has ${plural(b.open, "comment", "comments")} ready for a review cycle on ${esc(b.siteName)}</p>` +
-          `<div class="cmd"><code>${b.command
-            .split(" ")
-            .map((t) => `<span class="tok">${esc(t)}</span>`)
-            .join(" ")}</code>${copyButton(b.command)}</div>` +
-          `<div class="dl"><button type="button" class="btn quiet" data-action="download-batch" data-id="${esc(b.reviewerId)}" data-site="${esc(b.siteSlug)}">${DOWNLOAD}<span>Download batch file</span></button>` +
-          `<span class="dl-s">For when the network is blocked: ttf batch --from reads it.</span>${errLine()}</div>` +
-          `</div>`,
-      )
-      .join("") +
-    `</section>`
+    `<div class="cmd"><code>${command
+      .split(" ")
+      .map((t) => `<span class="tok">${esc(t)}</span>`)
+      .join(" ")}</code>${copyButton(command)}</div>`
   );
 }
 
-function flashHtml(f: Flash | null): string {
-  if (!f) return "";
+function flashHtml(f: Flash): string {
   const n = esc(firstName(f.name));
   return (
     `<div class="flash" data-flash role="status">` +
@@ -184,62 +186,27 @@ function flashHtml(f: Flash | null): string {
   );
 }
 
-function reviewersHtml(s: OwnerState): string {
-  const { reviewers } = s.overview;
-  const items = reviewers
-    .map((r) => {
-      const sel = r.id === s.selectedReviewerId;
-      const meta = [`${r.ready_count} open`, r.revoked ? `<span class="off">Link off</span>` : ""].filter(Boolean).join(" · ");
-      const controls = sel
-        ? `<div class="rv-actions">` +
-          `<button type="button" class="btn quiet" data-action="reissue" data-id="${esc(r.id)}">New link</button>` +
-          (r.revoked ? "" : `<button type="button" class="btn quiet" data-action="revoke" data-id="${esc(r.id)}">Turn off link</button>`) +
-          `</div>`
-        : "";
-      return (
-        `<li class="rv-item${sel ? " sel" : ""}">` +
-        `<button type="button" class="rv" data-action="select" data-id="${esc(r.id)}" aria-pressed="${sel}">` +
-        `<span class="av" aria-hidden="true">${esc(firstName(r.name).slice(0, 1).toUpperCase()) || "?"}</span>` +
-        `<span class="rv-n">${esc(r.name)}</span>` +
-        `<span class="rv-c">${meta}</span>` +
-        `</button>` +
-        controls +
-        `</li>`
-      );
-    })
-    .join("");
-  const form = field("Name", "name", 'placeholder="Alexis"') + `<button type="submit" class="btn">Add</button>`;
+function menuHtml(r: OwnerReviewer, batches: ReadyBatch[]): string {
+  const items =
+    (r.revoked ? "" : `<button type="button" class="mi" data-action="revoke" data-id="${esc(r.id)}">Turn off link</button>`) +
+    batches
+      .map((b) => {
+        const label = `Download batch file for ${b.siteName}`;
+        return (
+          `<div class="dl"><button type="button" class="mi" data-action="download-batch" data-id="${esc(r.id)}" data-site="${esc(b.siteSlug)}" data-label="${esc(label)}">` +
+          `${DOWNLOAD}<span>${esc(label)}</span></button>` +
+          `<p class="dl-s">For when the network is blocked: ttf batch --from reads it.</p>${errLine()}</div>`
+        );
+      })
+      .join("");
+  if (!items) return "";
   return (
-    `<section class="side" aria-labelledby="h-reviewers">` +
-    `<h2 class="lbl" id="h-reviewers">Reviewers</h2>` +
-    (items ? `<ul class="rv-list">${items}</ul>` : "") +
-    flashHtml(s.flash) +
-    adder("reviewer", reviewers.length ? "Add a reviewer" : "Add your first reviewer", form, reviewers.length === 0) +
-    `</section>`
+    `<details class="more"><summary class="ico" aria-label="${esc(`More for ${firstName(r.name)}`)}" title="More">${MORE}</summary>` +
+    `<div class="menu">${items}</div></details>`
   );
 }
 
-function assignHtml(s: OwnerState): string {
-  if (s.sites.length === 0) return `<p class="empty">Add a site first. The form is under Sites, below.</p>`;
-  if (s.overview.reviewers.length === 0) return `<p class="empty">Add a reviewer first, then assign pages here.</p>`;
-  const siteOpts = s.sites.map((x) => `<option value="${esc(x.slug)}">${esc(x.name)}</option>`).join("");
-  const revOpts = s.overview.reviewers
-    .map(
-      (r) =>
-        `<option value="${esc(r.id)}"${r.id === s.selectedReviewerId ? " selected" : ""}>${esc(r.name)}${r.revoked ? " (link off)" : ""}</option>`,
-    )
-    .join("");
-  const body =
-    `<div class="grid">` +
-    `<label class="fld"><span>Site</span><select name="site">${siteOpts}</select></label>` +
-    `<label class="fld"><span>Reviewer</span><select name="reviewer_id">${revOpts}</select></label>` +
-    field("Path", "path", 'placeholder="/digital-detox" autocapitalize="off" spellcheck="false"') +
-    field("Title", "title", 'placeholder="Digital Detox"') +
-    `</div><button type="submit" class="btn">Assign</button>`;
-  return adder("assign", "Assign a page", body, false);
-}
-
-function rowHtml(a: OwnerAssignment, site: Site | undefined): string {
+function pageHtml(a: OwnerAssignment, site: Site | undefined): string {
   const links =
     (site
       ? `<a class="lnk" href="${esc(site.origin + a.path)}" target="_blank" rel="noopener noreferrer">${OUT}<span>Page</span></a>`
@@ -253,43 +220,71 @@ function rowHtml(a: OwnerAssignment, site: Site | undefined): string {
       .join("");
   const label = `Remove ${a.title} from ${firstName(a.reviewer.name)}'s list`;
   return (
-    `<tr data-row="${esc(a.id)}">` +
-    `<td class="c-page"><span class="tt">${esc(a.title)}</span><span class="tu">${esc(site ? site.name + " " : "")}<span class="path">${esc(a.path)}</span></span></td>` +
-    `<td class="c-rev">${esc(a.reviewer.name)}</td>` +
-    `<td class="c-st"><span class="st ${a.status}">${STATUS_LABEL[a.status]}</span></td>` +
-    `<td class="c-links">${links}</td>` +
-    `<td class="c-rm"><button type="button" class="rm" data-action="remove" data-id="${esc(a.id)}" aria-label="${esc(label)}" title="Remove">${CLOSE}</button></td>` +
-    `</tr>`
+    `<li class="pg" data-row="${esc(a.id)}"><div class="grow">` +
+    `<p class="tt">${esc(a.title)}</p>` +
+    `<p class="tu">${esc(site ? site.name + " " : "")}<span class="mono">${esc(a.path)}</span></p>` +
+    `<div class="meta"><span class="st ${a.status}">${STATUS_LABEL[a.status]}</span><span class="counts">${countsText(a)}</span>${links}</div>` +
+    `</div><button type="button" class="rm" data-action="remove" data-id="${esc(a.id)}" aria-label="${esc(label)}" title="Remove">${CLOSE}</button></li>`
   );
 }
 
-function pagesHtml(s: OwnerState): string {
-  const sel = s.overview.reviewers.find((r) => r.id === s.selectedReviewerId) ?? null;
-  const rows = s.overview.assignments.filter((a) => !sel || a.reviewer.id === sel.id);
-  const sites = new Map(s.sites.map((x) => [x.slug, x]));
-  const heading = sel ? `${esc(firstName(sel.name))}'s pages` : "Pages";
-  const empty = sel ? `No pages for ${esc(firstName(sel.name))} yet.` : "No pages assigned yet.";
-  const table = rows.length
-    ? `<table class="pages"><thead><tr><th>Page</th><th>Reviewer</th><th>Status</th><th>Links</th><th><span class="sr">Remove</span></th></tr></thead>` +
-      `<tbody>${rows.map((a) => rowHtml(a, sites.get(a.site))).join("")}</tbody></table>`
-    : `<p class="empty">${empty}</p>`;
+/** Stand-in for the assign panel: the old form, fixed to one reviewer. */
+function assignFormHtml(s: OwnerState, r: OwnerReviewer): string {
+  const siteOpts = s.sites.map((x) => `<option value="${esc(x.slug)}">${esc(x.name)}</option>`).join("");
   return (
-    `<section class="pages-sec" aria-labelledby="h-pages">` +
-    `<div class="topline"><h2 class="h" id="h-pages">${heading}</h2>` +
-    (sel ? `<button type="button" class="btn quiet" data-action="select" data-id="">Show everyone</button>` : "") +
-    `</div>` +
-    assignHtml(s) +
-    table +
+    `<form class="assign" data-form="assign" novalidate>` +
+    `<p class="assign-h">Assign a page to ${esc(firstName(r.name))}</p>` +
+    `<input type="hidden" name="reviewer_id" value="${esc(r.id)}">` +
+    `<div class="grid">` +
+    `<label class="fld"><span>Site</span><select name="site">${siteOpts}</select></label>` +
+    field("Path", "path", 'placeholder="/digital-detox" autocapitalize="off" spellcheck="false"') +
+    field("Title", "title", 'placeholder="Digital Detox"') +
+    `</div>${errLine()}` +
+    `<div class="row-btns"><button type="submit" class="btn">Assign</button><button type="button" class="btn quiet" data-action="assign-cancel">Cancel</button></div>` +
+    `</form>`
+  );
+}
+
+function personHtml(s: OwnerState, r: OwnerReviewer, batches: ReadyBatch[]): string {
+  const sites = new Map(s.sites.map((x) => [x.slug, x]));
+  const mine = s.overview.assignments.filter((a) => a.reviewer.id === r.id);
+  const first = esc(firstName(r.name));
+  const sub = `${plural(r.unsettled_count, "open comment", "open comments")} · ${r.revoked ? `<span class="off">Link off</span>` : "link on"}`;
+  const ready = batches
+    .map((b) => `<div class="ready" data-ready><p>${plural(b.open, "comment", "comments")} ready to fix on ${esc(b.siteName)}</p>${commandHtml(b.command)}</div>`)
+    .join("");
+  const pages = mine.length
+    ? `<ul class="pgs">${mine.map((a) => pageHtml(a, sites.get(a.site))).join("")}</ul>`
+    : `<p class="none">No pages for ${first} yet.</p>`;
+  const add =
+    s.sites.length === 0
+      ? ""
+      : s.assignFor === r.id
+        ? assignFormHtml(s, r)
+        : `<div class="add"><button type="button" class="btn quiet" data-action="assign" data-id="${esc(r.id)}">${PLUS}<span>Assign a page to ${first}</span></button></div>`;
+  return (
+    `<section class="person" data-person="${esc(r.id)}" aria-labelledby="p-${esc(r.id)}">` +
+    `<div class="person-h"><span class="av" aria-hidden="true">${initial(r.name)}</span>` +
+    `<div class="grow"><h2 class="pname" id="p-${esc(r.id)}">${esc(r.name)}</h2><p class="tu">${sub}</p></div>` +
+    `<button type="button" class="btn quiet" data-action="reissue" data-id="${esc(r.id)}">${LINK}<span>New link</span></button>` +
+    menuHtml(r, batches) +
+    `</div><div class="person-err"></div>` +
+    (s.flash && s.flash.id === r.id ? flashHtml(s.flash) : "") +
+    ready +
+    pages +
+    add +
     `</section>`
   );
 }
 
 function sitesHtml(s: OwnerState): string {
+  const count = new Map<string, number>();
+  for (const a of s.overview.assignments) count.set(a.site, (count.get(a.site) ?? 0) + 1);
   const list = s.sites
     .map(
       (x) =>
-        `<li class="site-row"><span class="tt">${esc(x.name)}</span>` +
-        `<span class="tu"><span class="part">${esc(x.origin)}</span> · <span class="part">${esc(x.repo)}</span> · <span class="part">slug <code>${esc(x.slug)}</code></span></span></li>`,
+        `<li class="siterow"><b>${esc(x.name)}</b><span class="tu">${esc(hostOf(x.origin))} · ${plural(count.get(x.slug) ?? 0, "page", "pages")}</span>` +
+        `<span class="tu more-line">slug <code>${esc(x.slug)}</code> · ${esc(x.repo)}</span></li>`,
     )
     .join("");
   const body =
@@ -300,23 +295,28 @@ function sitesHtml(s: OwnerState): string {
     field("Repo", "repo", 'placeholder="workingBen/longevity-tracker" autocapitalize="off" spellcheck="false"') +
     `</div><button type="submit" class="btn">Add site</button>`;
   return (
-    `<section class="sites-sec" aria-labelledby="h-sites">` +
-    `<h2 class="h" id="h-sites">Sites</h2>` +
-    (list ? `<ul class="site-list">${list}</ul>` : "") +
-    adder("site", "Add a site", body, s.sites.length === 0) +
+    `<section class="sites" aria-labelledby="h-sites">` +
+    `<div class="sec-h"><h2 class="h2" id="h-sites">Sites</h2>${adder("site", "Add a site", body, s.sites.length === 0)}</div>` +
+    (list ? `<ul class="rule" data-sites>${list}</ul>` : "") +
     `</section>`
   );
 }
 
 export function renderOwner(state: OwnerState): string {
+  const { reviewers } = state.overview;
+  const batches = readyBatches(state.overview, state.sites);
+  const form = field("Name", "name", 'placeholder="Alexis"') + `<button type="submit" class="btn">Add</button>`;
   return (
     `<h1 class="sr">tap-to-fix owner dashboard</h1>` +
-    `<div class="owner">` +
-    `<div class="a-ready">${readyHtml(readyBatches(state.overview, state.sites), state.overview.reviewers)}</div>` +
-    `<div class="a-side">${reviewersHtml(state)}</div>` +
-    `<div class="a-pages">${pagesHtml(state)}</div>` +
-    `<div class="a-sites">${sitesHtml(state)}</div>` +
-    `</div>`
+    `<div class="top"><p class="brand">tap-to-fix</p>` +
+    adder("reviewer", reviewers.length ? "Add a reviewer" : "Add your first reviewer", form, reviewers.length === 0) +
+    `</div>` +
+    (state.flash && !reviewers.some((r) => r.id === state.flash!.id) ? flashHtml(state.flash) : "") +
+    (state.sites.length === 0 ? `<p class="empty">Add a site first. The form is under Sites, below.</p>` : "") +
+    (reviewers.length
+      ? `<div class="people">${reviewers.map((r) => personHtml(state, r, batches.filter((b) => b.reviewerId === r.id))).join("")}</div>`
+      : "") +
+    sitesHtml(state)
   );
 }
 
@@ -331,74 +331,45 @@ export function renderTokenForm(): string {
 }
 
 export const OWNER_CSS = `
-main { max-width: 1240px; padding-top: 28px; }
+main { max-width: 1240px; padding-top: 22px; }
 .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
-.owner { display: grid; grid-template-columns: minmax(0, 1fr); grid-template-areas: "ready" "side" "pages" "sites"; row-gap: 36px; }
-.a-ready { grid-area: ready; } .a-side { grid-area: side; } .a-pages { grid-area: pages; } .a-sites { grid-area: sites; }
-.a-ready:empty { display: none; }
-.h { font: 600 26px/1.2 var(--hf); margin: 0; letter-spacing: -0.01em; }
-.lbl { font-size: 17px; font-weight: 600; letter-spacing: .1em; text-transform: uppercase; color: var(--mut); margin: 0 0 8px; }
-.empty { font: 400 19px/1.45 var(--hf); color: var(--mut); margin: 16px 0 0; }
-.tt { font: 600 19px/1.3 var(--hf); overflow-wrap: anywhere; }
-.tu { font-size: 17px; line-height: 1.4; color: var(--mut); overflow-wrap: anywhere; }
-.path, code { font-family: ui-monospace, Menlo, monospace; font-size: 17px; }
-.part { white-space: nowrap; }
+p, h2 { margin: 0; }
 button { font: inherit; color: inherit; }
+.h { font: 600 26px/1.2 var(--hf); margin: 0; letter-spacing: -0.01em; }
+.h2 { font: 600 24px/1.2 var(--hf); }
+.empty { font: 400 19px/1.45 var(--hf); color: var(--mut); margin: 22px 0 0; }
+.tt { font: 600 19px/1.3 var(--hf); overflow-wrap: anywhere; }
+.tu { font-size: 16px; line-height: 1.4; color: var(--mut); overflow-wrap: anywhere; }
+.mono, code { font-family: ui-monospace, Menlo, monospace; font-size: 16px; }
+.grow { flex: 1 1 auto; min-width: 0; }
+.off { color: var(--warn); font-weight: 600; }
 
 .btn {
-  display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 0 20px;
-  border: 0; border-radius: 999px; background: var(--acc); color: var(--acc-ink); font-size: 17px; font-weight: 600; cursor: pointer;
+  display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 44px; padding: 0 18px;
+  border: 0; border-radius: 999px; background: var(--acc); color: var(--acc-ink); font-size: 17px; font-weight: 600; cursor: pointer; white-space: nowrap;
 }
-.btn.quiet { background: transparent; color: var(--acc); padding: 0 12px; }
+.btn.quiet { background: transparent; color: var(--acc); padding: 0 10px; }
 .btn.quiet:hover { background: var(--soft); }
-.btn:focus-visible, .rv:focus-visible, .rm:focus-visible, .lnk:focus-visible, summary:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
+.ico { display: inline-grid; place-items: center; width: 44px; height: 44px; color: var(--mut); border-radius: 50%; cursor: pointer; }
+.ico:hover { background: var(--soft); color: var(--ink); }
+.btn:focus-visible, .rm:focus-visible, .lnk:focus-visible, .mi:focus-visible, summary:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
 
-/* the one highlighted box */
-.ready-wrap { display: flex; flex-direction: column; gap: 12px; }
-.ready { background: var(--soft); border-radius: var(--r); padding: 18px 20px; display: flex; flex-direction: column; gap: 12px; }
-.ready-h { margin: 0; font: 600 20px/1.35 var(--hf); }
-.cmd { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-.cmd code, .flash-url {
-  font-size: 17px; font-weight: 600; background: var(--surf); border: 1px solid var(--line); border-radius: 8px;
-  padding: 10px 12px; overflow-wrap: break-word; min-width: 0; user-select: all;
-}
-.cmd code { flex: 1 1 auto; overflow-wrap: normal; overflow-x: auto; }
-.dl { display: flex; align-items: center; gap: 4px 8px; flex-wrap: wrap; margin-left: -12px; }
-.dl-s { font-size: 17px; color: var(--mut); }
-.dl .err { flex-basis: 100%; margin-left: 12px; }
-.cmd .tok { white-space: nowrap; hyphens: none; }
+/* top bar */
+.top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.brand { font: 600 24px/1.2 var(--hf); }
 
-/* reviewers */
-.rv-list { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
-.rv-item { border-bottom: 1px solid var(--line); }
-.rv {
-  display: grid; grid-template-columns: 34px minmax(0, 1fr); grid-template-areas: "av n" "av c"; column-gap: 12px; align-items: center;
-  width: 100%; min-height: 64px; padding: 10px 8px; border: 0; background: none; text-align: left; cursor: pointer; border-radius: 10px;
-}
-.rv:hover { background: var(--surf); }
-.rv-item.sel .rv { background: var(--soft); }
-.av { grid-area: av; width: 34px; height: 34px; border-radius: 50%; background: var(--ink); color: var(--bg); display: grid; place-items: center; font-weight: 700; font-size: 17px; }
-.rv-item.sel .av { background: var(--acc); color: var(--acc-ink); }
-.rv-n { grid-area: n; font-weight: 600; font-size: 18px; overflow-wrap: anywhere; }
-.rv-c { grid-area: c; font-size: 17px; color: var(--mut); }
-.off { color: var(--warn); font-weight: 600; }
-.rv-actions { display: flex; flex-wrap: wrap; gap: 4px; padding: 2px 0 10px 46px; }
-.rv-actions .err, .c-page .err { flex-basis: 100%; margin-top: 4px; }
-.flash { margin-top: 16px; padding: 16px 0 4px; border-top: 2px solid var(--acc); }
-.flash-h { margin: 0; font: 600 20px/1.3 var(--hf); }
-.flash-s { margin: 4px 0 10px; font-size: 17px; color: var(--mut); }
-.flash-url { display: block; }
-.flash-row { display: flex; gap: 4px; margin-top: 8px; margin-left: -12px; }
-
-/* inline forms */
-.adder { margin-top: 12px; }
+/* inline forms (Add a reviewer, Add a site): the toggle sits at the right, the form opens full width under it */
+.adder { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; }
+.adder[open] { flex-basis: 100%; }
 .adder > summary {
-  display: inline-flex; align-items: center; gap: 8px; min-height: 44px; color: var(--acc); font-weight: 600; font-size: 17px;
-  cursor: pointer; list-style: none; border-radius: 8px;
+  display: inline-flex; align-items: center; gap: 7px; min-height: 44px; padding: 0 18px; border-radius: 999px;
+  color: var(--acc); font-weight: 600; font-size: 17px; cursor: pointer; list-style: none; white-space: nowrap;
 }
+.top .adder > summary { background: var(--surf); border: 1.5px solid var(--line); }
+.sites .adder > summary { padding: 0 10px; }
+.adder > summary:hover { background: var(--soft); }
 .adder > summary::-webkit-details-marker { display: none; }
-.adder[open] > summary { margin-bottom: 6px; }
-.adder form { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; padding: 4px 0 8px; }
+.adder form { align-self: stretch; display: flex; flex-direction: column; align-items: flex-start; gap: 14px; padding: 14px 0 8px; }
 .grid { display: grid; grid-template-columns: minmax(0, 1fr); gap: 14px; width: 100%; }
 .fld { display: flex; flex-direction: column; gap: 5px; width: 100%; min-width: 0; }
 .fld > span { font-size: 17px; font-weight: 600; color: var(--mut); }
@@ -410,39 +381,79 @@ button { font: inherit; color: inherit; }
 .err { margin: 0; color: var(--warn); background: var(--warn-bg); border-radius: 8px; padding: 8px 12px; font-size: 17px; }
 .err[hidden] { display: none; }
 
-/* pages */
-.topline { display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap; }
-.pages { width: 100%; border-collapse: collapse; margin-top: 12px; }
-.pages thead { display: none; }
-.pages tbody { display: block; border-top: 1px solid var(--line); }
-.pages tr {
-  display: grid; grid-template-columns: auto minmax(0, 1fr) 44px; grid-template-areas: "page page rm" "rev st st" "links links links";
-  column-gap: 10px; row-gap: 6px; padding: 14px 0 8px; border-bottom: 1px solid var(--line); align-items: center;
+/* one column per reviewer */
+.people { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 40px; margin-top: 22px; align-items: start; }
+.person { min-width: 0; }
+.person-h { display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 2px solid var(--ink); }
+.av { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: var(--bg); font-weight: 700; flex: none; }
+.pname { font: 600 22px/1.2 var(--hf); overflow-wrap: anywhere; }
+.person-err:empty { display: none; }
+.person-err .err { margin-top: 10px; }
+
+/* the more menu */
+.more { position: relative; flex: none; }
+.more > summary { list-style: none; }
+.more > summary::-webkit-details-marker { display: none; }
+.more[open] > summary { background: var(--soft); color: var(--ink); }
+.menu {
+  position: absolute; right: 0; top: calc(100% + 4px); z-index: 5; width: max-content; max-width: min(360px, calc(100vw - 32px));
+  background: var(--surf); border: 1.5px solid var(--line); border-radius: 12px; box-shadow: 0 8px 24px rgba(31, 42, 36, .12); padding: 6px 0;
 }
-.pages td { padding: 0; }
-.c-page { grid-area: page; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.c-rev { grid-area: rev; font-size: 17px; white-space: nowrap; }
-.c-page .path { display: block; }
-.c-rev::after { content: " ·"; color: var(--mut); }
-.c-st { grid-area: st; }
-.c-links { grid-area: links; display: flex; flex-wrap: wrap; column-gap: 18px; margin-left: -2px; }
-.c-links:empty { display: none; }
-.c-rm { grid-area: rm; align-self: start; justify-self: end; }
-.st { display: inline-block; font-size: 17px; font-weight: 600; padding: 4px 12px; border-radius: 999px; background: var(--line); color: var(--ink); white-space: nowrap; }
+.mi {
+  display: flex; align-items: center; gap: 10px; width: 100%; min-height: 48px; padding: 0 16px; border: 0; background: none;
+  text-align: left; font-size: 17px; font-weight: 600; color: var(--acc); cursor: pointer;
+}
+.mi:hover { background: var(--soft); }
+.menu > * + * { border-top: 1px solid var(--line); }
+.dl { padding-bottom: 10px; }
+.dl-s { font-size: 16px; color: var(--mut); padding: 0 16px 0 44px; }
+.dl .err { margin: 8px 16px 0; }
+
+/* new-link flash, in the reviewer's column */
+.flash { margin-top: 14px; padding: 14px 0 6px; border-bottom: 1px solid var(--line); }
+.flash-h { font: 600 20px/1.3 var(--hf); }
+.flash-s { margin: 4px 0 10px; font-size: 16px; color: var(--mut); }
+.flash-url { display: block; font-size: 16px; font-weight: 600; background: var(--surf); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow-wrap: anywhere; user-select: all; }
+.flash-row { display: flex; gap: 4px; margin-top: 8px; margin-left: -10px; }
+
+/* ready strip: a rule at the left, no box */
+.ready { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 14px 0 4px; padding: 12px 0 12px 14px; border-left: 4px solid var(--acc); }
+.ready p { font-weight: 600; }
+.cmd { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 44px; padding: 0 4px 0 12px; background: var(--surf); border: 1px solid var(--line); border-radius: 8px; }
+.cmd code { font-size: 15px; font-weight: 600; user-select: all; min-width: 0; padding: 8px 0; }
+.cmd .tok { white-space: nowrap; }
+.cmd .btn { flex: none; }
+
+/* pages: ruled rows */
+.pgs { list-style: none; margin: 0; padding: 0; }
+.pg { display: flex; gap: 12px; align-items: flex-start; padding: 14px 0; border-bottom: 1px solid var(--line); }
+.pg .err { margin-top: 8px; }
+.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; margin-top: 0; }
+.st { display: inline-block; font-size: 15px; font-weight: 600; padding: 3px 11px; border-radius: 999px; background: var(--line); color: var(--ink); white-space: nowrap; }
 .st.open { background: var(--warn-bg); color: var(--warn); }
 .st.in_progress { background: var(--soft); color: var(--acc); }
 .st.done { background: var(--acc); color: var(--acc-ink); }
-.lnk { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--acc); font-weight: 600; font-size: 17px; text-decoration: none; white-space: nowrap; }
+.counts { font-size: 16px; color: var(--mut); }
+.counts b { color: var(--warn); font-weight: 700; }
+.lnk { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--acc); font-weight: 600; font-size: 16px; text-decoration: none; white-space: nowrap; }
 .lnk:hover span { text-decoration: underline; }
 .lnk.plain { color: var(--mut); }
 .lnk.plain:hover span { text-decoration: none; }
-.rm { display: grid; place-items: center; width: 44px; height: 44px; border: 0; background: none; color: var(--mut); border-radius: 50%; cursor: pointer; }
+.rm { display: grid; place-items: center; flex: none; width: 44px; height: 44px; margin-top: -8px; border: 0; background: none; color: var(--mut); border-radius: 50%; cursor: pointer; }
 .rm:hover { background: var(--warn-bg); color: var(--warn); }
+.none { color: var(--mut); padding: 14px 0; border-bottom: 1px solid var(--line); }
+.add { margin-top: 6px; margin-left: -10px; }
+.assign { display: flex; flex-direction: column; align-items: flex-start; gap: 14px; padding: 16px 0 8px; }
+.assign-h { font: 600 20px/1.3 var(--hf); }
+.row-btns { display: flex; gap: 8px; }
 
 /* sites */
-.site-list { list-style: none; margin: 12px 0 0; padding: 0; border-top: 1px solid var(--line); }
-.site-row { display: flex; flex-direction: column; gap: 2px; padding: 14px 0; border-bottom: 1px solid var(--line); }
-.site-row code { font-size: 17px; color: var(--ink); }
+.sites { margin-top: 48px; }
+.sec-h { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; margin-bottom: 8px; }
+.rule { list-style: none; margin: 0; padding: 0; border-top: 1px solid var(--line); }
+.siterow { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 10px; padding: 12px 0; border-bottom: 1px solid var(--line); }
+.siterow .more-line { flex-basis: 100%; }
+.siterow code { font-size: 16px; color: var(--ink); }
 
 /* token form */
 .token { max-width: 420px; margin: 48px auto 0; display: flex; flex-direction: column; align-items: flex-start; gap: 16px; }
@@ -451,40 +462,10 @@ button { font: inherit; color: inherit; }
 
 @media (min-width: 640px) {
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .assign .grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (min-width: 900px) {
-  main { padding: 40px 32px 72px; }
-  .owner {
-    grid-template-columns: 290px minmax(0, 1fr); grid-template-rows: auto auto 1fr;
-    grid-template-areas: "side ready" "side pages" "side sites"; column-gap: 44px; row-gap: 40px;
-  }
-  .a-side { border-right: 1px solid var(--line); padding-right: 24px; align-self: stretch; }
-  .owner { row-gap: 0; }
-  .a-ready:not(:empty) ~ .a-pages { margin-top: 36px; }
-  .a-sites { margin-top: 56px; }
-}
-@media (min-width: 1200px) {
-  .pages thead { display: table-header-group; }
-  .pages tbody { display: table-row-group; border-top: 0; }
-  .pages tr { display: table-row; }
-  .pages th {
-    text-align: left; font-size: 17px; font-weight: 600; letter-spacing: .04em; text-transform: uppercase; color: var(--mut);
-    padding: 10px 12px; border-bottom: 1px solid var(--line);
-  }
-  .pages td { padding: 14px 12px; border-bottom: 1px solid var(--line); vertical-align: middle; }
-  .pages td:first-child, .pages th:first-child { padding-left: 0; }
-  .pages td:last-child, .pages th:last-child { padding-right: 0; width: 44px; }
-  .c-page { display: table-cell; }
-  .c-page .tt, .c-page .tu { display: block; }
-  .c-page .path { display: inline; }
-  .c-rev::after { content: none; }
-  .c-links { display: table-cell; white-space: nowrap; }
-  .c-links:empty { display: table-cell; }
-  .c-links .lnk + .lnk { margin-left: 16px; }
-  .ready { flex-direction: row; align-items: center; justify-content: space-between; gap: 20px; }
-  .cmd { flex: none; }
-  .ready { flex-wrap: wrap; }
-  .dl { flex-basis: 100%; }
+  main { padding: 32px 32px 72px; }
 }
 `;
 
@@ -570,7 +551,7 @@ export async function mountOwner(win: Window): Promise<void> {
     }
   }
 
-  const state: OwnerState = { sites: [], overview: { reviewers: [], assignments: [] }, selectedReviewerId: null, flash: null };
+  const state: OwnerState = { sites: [], overview: { reviewers: [], assignments: [] }, assignFor: null, flash: null };
 
   main.addEventListener("submit", (ev) => {
     const form = (ev.target as Element | null)?.closest?.("form[data-form]") as HTMLFormElement | null;
@@ -579,6 +560,8 @@ export async function mountOwner(win: Window): Promise<void> {
     void onSubmit(form);
   });
   main.addEventListener("click", (ev) => {
+    const inside = (ev.target as Element | null)?.closest?.("details.more");
+    for (const d of main.querySelectorAll("details.more[open]")) if (d !== inside) d.removeAttribute("open");
     const el = (ev.target as Element | null)?.closest?.("[data-action], [data-copy]") as HTMLElement | null;
     if (!el) return;
     void onClick(el);
@@ -618,8 +601,8 @@ export async function mountOwner(win: Window): Promise<void> {
     }
     state.overview = ov.data;
     state.sites = sites.data;
-    if (state.selectedReviewerId && !state.overview.reviewers.some((r) => r.id === state.selectedReviewerId)) {
-      state.selectedReviewerId = null;
+    if (state.assignFor && !state.overview.reviewers.some((r) => r.id === state.assignFor)) {
+      state.assignFor = null;
     }
     render();
     return true;
@@ -632,8 +615,8 @@ export async function mountOwner(win: Window): Promise<void> {
     line.hidden = false;
   };
 
-  const linkFlash = (r: { name: string; token: string }) => {
-    state.flash = { kind: "link", name: r.name, url: reviewerLink(win.location.origin, r.token) };
+  const linkFlash = (r: { id: string; name: string; token: string }) => {
+    state.flash = { kind: "link", id: r.id, name: r.name, url: reviewerLink(win.location.origin, r.token) };
   };
 
   async function onSubmit(form: HTMLFormElement): Promise<void> {
@@ -654,10 +637,10 @@ export async function mountOwner(win: Window): Promise<void> {
       if (res.ok) {
         const r = res.data as { id: string; name: string; token: string };
         linkFlash(r);
-        state.selectedReviewerId = r.id;
       }
     } else if (kind === "assign") {
       res = await api(tok, "/api/owner/assignments", { method: "POST", json: data });
+      if (res.ok) state.assignFor = null;
     } else if (kind === "site") {
       res = await api(tok, "/api/owner/sites", { method: "POST", json: data });
     } else {
@@ -695,8 +678,12 @@ export async function mountOwner(win: Window): Promise<void> {
     } else if (action === "retry") {
       main.innerHTML = '<p class="notice muted">Loading…</p>';
       await refresh();
-    } else if (action === "select") {
-      state.selectedReviewerId = id && state.selectedReviewerId !== id ? id : null;
+    } else if (action === "assign" && reviewer) {
+      state.assignFor = id;
+      render();
+      (main.querySelector(`[data-person="${CSS.escape(id)}"] form[data-form=assign] select`) as HTMLElement | null)?.focus();
+    } else if (action === "assign-cancel") {
+      state.assignFor = null;
       render();
     } else if (action === "dismiss") {
       state.flash = null;
@@ -713,7 +700,7 @@ export async function mountOwner(win: Window): Promise<void> {
       if (!win.confirm(revokeConfirm(reviewer.name))) return;
       const res = await api(tok, `/api/owner/reviewers/${encodeURIComponent(id)}/revoke`, { method: "POST" });
       if (!res.ok) return failNear(el, res);
-      if (state.flash && state.flash.name === reviewer.name) state.flash = null;
+      if (state.flash && state.flash.id === reviewer.id) state.flash = null;
       await refresh();
     } else if (action === "remove") {
       const a = state.overview.assignments.find((x) => x.id === id);
@@ -754,14 +741,14 @@ export async function mountOwner(win: Window): Promise<void> {
     } catch {
       fail(MSG_OFFLINE);
     } finally {
-      if (label) label.textContent = "Download batch file";
+      if (label) label.textContent = el.getAttribute("data-label") ?? "Download batch file";
     }
   }
 
-  /** A --warn line next to the control that failed: under the reviewer's link buttons, or in the page cell. */
+  /** A --warn line next to the control that failed: in the page row, or under the reviewer's header. */
   function failNear(el: HTMLElement, res: { status: number; error?: string }): void {
     if (res.status === 401 || res.status === 403) return forgetToken();
-    const spot = (el.closest(".rv-actions") ?? el.closest("tr")?.querySelector(".c-page")) as HTMLElement | null;
+    const spot = (el.closest(".pg")?.querySelector(".grow") ?? el.closest(".person")?.querySelector(".person-err")) as HTMLElement | null;
     if (!spot) return;
     let line = spot.querySelector(":scope > .err") as HTMLElement | null;
     if (!line) {

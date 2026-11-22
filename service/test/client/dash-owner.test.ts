@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  countsText,
   fixCommand,
   mountOwner,
   prLabel,
@@ -40,7 +41,7 @@ function state(over: Partial<OwnerState> = {}): OwnerState {
   return {
     sites: SITES,
     overview: { reviewers: [ALEXIS], assignments: [] },
-    selectedReviewerId: null,
+    assignFor: null,
     flash: null,
     ...over,
   };
@@ -91,14 +92,6 @@ describe("readyBatches", () => {
   });
 });
 
-describe("ready box heading", () => {
-  it("uses the full name when the first name is shared", () => {
-    const smith = { ...ALEXIS, id: "r2", name: "Alexis Smith" };
-    const html = renderOwner(state({ overview: { reviewers: [ALEXIS, smith], assignments: [a({}, { open: 2 })] } }));
-    expect(html).toContain("Alexis Rivera has 2 comments ready");
-  });
-});
-
 describe("unambiguous fix commands", () => {
   it("two reviewers with the same first name both get slug commands", () => {
     const smith = { ...ALEXIS, id: "r2", name: "Alexis Smith" };
@@ -114,13 +107,14 @@ describe("unambiguous fix commands", () => {
     const quiet = { ...overview, assignments: [a({ id: "1" }, { open: 2 })] };
     expect(readyBatches(quiet, SITES)[0].command).toBe("/tap-to-fix:fix alexis-rivera bonus-decade");
   });
-  it("each ready box has a 44px-class download button carrying reviewer and site", () => {
+  it("the reviewer's more menu downloads each ready batch, carrying reviewer and site", () => {
     const box = document.createElement("div");
     box.innerHTML = renderOwner(state({ overview: { reviewers: [ALEXIS], assignments: [a({}, { open: 1 })] } }));
-    const btn = box.querySelector("[data-ready] [data-action=download-batch]")!;
+    const btn = box.querySelector("[data-person=r1] details.more [data-action=download-batch]")!;
     expect(btn.getAttribute("data-id")).toBe("r1");
     expect(btn.getAttribute("data-site")).toBe("bonus-decade");
-    expect(btn.textContent).toContain("Download batch file");
+    expect(btn.textContent).toContain("Download batch file for Bonus Decade");
+    expect(box.querySelector("[data-person=r1] details.more")!.textContent).toContain("For when the network is blocked: ttf batch --from reads it.");
   });
 });
 
@@ -140,11 +134,27 @@ describe("renderOwner", () => {
     const html = renderOwner(state({ overview: { reviewers: [], assignments: [] } }));
     expect(html).toContain("Add your first reviewer");
   });
-  it("no sites: says to add a site first in place of the assign form", () => {
+  it("no reviewers: the add-reviewer form is open", () => {
+    const box = document.createElement("div");
+    box.innerHTML = renderOwner(state({ overview: { reviewers: [], assignments: [] } }));
+    expect(box.querySelector("[data-adder=reviewer]")!.hasAttribute("open")).toBe(true);
+    box.innerHTML = renderOwner(state());
+    expect(box.querySelector("[data-adder=reviewer]")!.hasAttribute("open")).toBe(false);
+  });
+  it("no sites: says to add a site first and offers no assign button", () => {
     const html = renderOwner(state({ sites: [] }));
-    expect(html).toContain("Add a site first");
-    expect(html).not.toContain('data-form="assign"');
-    expect(renderOwner(state())).toContain('data-form="assign"');
+    expect(html).toContain("Add a site first. The form is under Sites, below.");
+    expect(html).not.toContain('data-action="assign"');
+  });
+  it("the assign button opens a form for that reviewer only (stub until the panel lands)", () => {
+    const ben = { ...ALEXIS, id: "r2", name: "Ben Pellow" };
+    const s = state({ overview: { reviewers: [ALEXIS, ben], assignments: [] } });
+    expect(renderOwner(s)).not.toContain('data-form="assign"');
+    const box = document.createElement("div");
+    box.innerHTML = renderOwner({ ...s, assignFor: "r2" });
+    expect(box.querySelectorAll("form[data-form=assign]")).toHaveLength(1);
+    const form = box.querySelector("[data-person=r2] form[data-form=assign]")!;
+    expect((form.querySelector("input[name=reviewer_id]") as HTMLInputElement).value).toBe("r2");
   });
   it("escapes names and titles", () => {
     const html = renderOwner(
@@ -173,13 +183,13 @@ describe("renderOwner", () => {
     expect(html).toContain("PR #42");
     expect(html).toMatch(/>PR<\/span>/);
   });
-  it("ready box with the review-cycle sentence and the command", () => {
+  it("ready strip with the count, the site and the command", () => {
     const html = renderOwner(
       state({
         overview: { reviewers: [{ ...ALEXIS, ready_count: 7 }], assignments: [a({ status: "open" }, { open: 7 })] },
       }),
     );
-    expect(html).toContain("Alexis has 7 comments ready for a review cycle on Bonus Decade");
+    expect(html).toContain("7 comments ready to fix on Bonus Decade");
     expect(html).toContain("/tap-to-fix:fix alexis bonus-decade");
     // The command breaks only at spaces: each word is kept whole, and the copied text is exact.
     const box = document.createElement("div");
@@ -189,30 +199,124 @@ describe("renderOwner", () => {
     expect([...code.querySelectorAll(".tok")].map((t) => t.textContent)).toEqual(["/tap-to-fix:fix", "alexis", "bonus-decade"]);
     expect(box.querySelector("[data-ready] [data-copy]")!.getAttribute("data-copy")).toBe("/tap-to-fix:fix alexis bonus-decade");
   });
-  it("revoked reviewers say Link off; selecting one filters and shows the link controls", () => {
+  it("every column has New link; Turn off link only while the link is on", () => {
     const chris = { ...ALEXIS, id: "r2", name: "Chris Tosswill", revoked: true };
-    const s = state({
-      overview: {
-        reviewers: [ALEXIS, chris],
-        assignments: [a({ id: "x1", title: "Alexis page" }), a({ id: "x2", title: "Chris page", reviewer: { id: "r2", name: "Chris Tosswill" } })],
-      },
-    });
-    expect(renderOwner(s)).toContain("Link off");
-    expect(renderOwner(s)).not.toContain("Turn off link");
-    const sel = renderOwner({ ...s, selectedReviewerId: "r1" });
-    expect(sel).toContain("Alexis page");
-    expect(sel).not.toContain("Chris page");
-    expect(sel).toContain("New link");
-    expect(sel).toContain("Turn off link");
-    // A revoked reviewer can get a new link but has nothing to turn off.
-    const selChris = renderOwner({ ...s, selectedReviewerId: "r2" });
-    expect(selChris).toContain("New link");
-    expect(selChris).not.toContain("Turn off link");
+    const box = document.createElement("div");
+    box.innerHTML = renderOwner(state({ overview: { reviewers: [ALEXIS, chris], assignments: [] } }));
+    const col = (id: string) => box.querySelector(`[data-person=${id}]`)!;
+    expect(col("r1").querySelector("[data-action=reissue]")!.textContent).toBe("New link");
+    expect(col("r2").querySelector("[data-action=reissue]")!.textContent).toBe("New link");
+    expect(col("r1").querySelector("details.more [data-action=revoke]")!.textContent).toBe("Turn off link");
+    expect(col("r2").querySelector("[data-action=revoke]")).toBeNull();
   });
-  it("link flash names the reviewer and shows the link", () => {
-    const html = renderOwner(state({ flash: { kind: "link", name: "Alexis Rivera", url: "https://t.example/r/#ttf=abc" } }));
-    expect(html).toContain("Text this link to Alexis");
-    expect(html).toContain("https://t.example/r/#ttf=abc");
+  it("link flash names the reviewer and sits in that reviewer's column", () => {
+    const ben = { ...ALEXIS, id: "r2", name: "Ben Pellow" };
+    const box = document.createElement("div");
+    box.innerHTML = renderOwner(
+      state({ overview: { reviewers: [ALEXIS, ben], assignments: [] }, flash: { kind: "link", id: "r2", name: "Ben Pellow", url: "https://t.example/r/#ttf=abc" } }),
+    );
+    const flash = box.querySelector("[data-person=r2] [data-flash]")!;
+    expect(flash.textContent).toContain("Text this link to Ben");
+    expect(flash.textContent).toContain("https://t.example/r/#ttf=abc");
+    expect(box.querySelectorAll("[data-flash]")).toHaveLength(1);
+  });
+});
+
+describe("countsText", () => {
+  it("bolds the open count and leaves out zeros", () => {
+    expect(countsText(a({}, { open: 3, in_progress: 1, settled: 0 }))).toBe("<b>3 open</b> · 1 in progress");
+    expect(countsText(a({}, { open: 0, in_progress: 0, settled: 2 }))).toBe("2 settled");
+    expect(countsText(a({}, { open: 1, in_progress: 0, settled: 4 }))).toBe("<b>1 open</b> · 4 settled");
+  });
+  it("says No comments yet when all three are zero", () => {
+    expect(countsText(a())).toBe("No comments yet");
+  });
+});
+
+describe("one column per reviewer", () => {
+  const BEN = { id: "r2", name: "Ben Pellow", revoked: false, unsettled_count: 1, ready_count: 1 };
+  const THREE: Site[] = [...SITES, { slug: "alexis-art", name: "Alexis Art", origin: "https://art.greensprings.life", repo: "workingBen/art" }];
+  const ben = { id: "r2", name: "Ben Pellow" };
+  const overview: Overview = {
+    reviewers: [{ ...ALEXIS, unsettled_count: 5 }, BEN],
+    assignments: [
+      a({ id: "p6", title: "Gallery", site: "alexis-art", path: "/gallery", status: "open" }, { open: 1 }),
+      a({ id: "p5", title: "Gifts buying club", site: "greensprings", path: "/gifts", reviewer: ben, status: "open" }, { open: 1, in_progress: 1 }),
+      a({ id: "p4", title: "Home page", site: "bonus-decade", path: "/", reviewer: ben, status: "done" }, { settled: 2 }),
+      a({ id: "p3", title: "Sauna protocol", site: "bonus-decade", path: "/protocols/sauna" }),
+      a({ id: "p2", title: "Digital Detox Retreat", site: "greensprings", path: "/digital-detox", status: "open" }, { open: 1, settled: 2 }),
+      a({ id: "p1", title: "Virtual EMF Assessment", site: "greensprings", path: "/virtual-emf-assessment", status: "open" }, { open: 3, in_progress: 1 }),
+    ],
+  };
+  const render = (over: Partial<OwnerState> = {}) => {
+    const box = document.createElement("div");
+    box.innerHTML = renderOwner(state({ sites: THREE, overview, ...over }));
+    return box;
+  };
+
+  it("one column per reviewer, in reviewer order", () => {
+    expect([...render().querySelectorAll("[data-person]")].map((c) => c.getAttribute("data-person"))).toEqual(["r1", "r2"]);
+  });
+  it("each column holds only that reviewer's pages, in overview order", () => {
+    const box = render();
+    const titles = (id: string) => [...box.querySelectorAll(`[data-person=${id}] [data-row] .tt`)].map((t) => t.textContent);
+    expect(titles("r1")).toEqual(["Gallery", "Sauna protocol", "Digital Detox Retreat", "Virtual EMF Assessment"]);
+    expect(titles("r2")).toEqual(["Gifts buying club", "Home page"]);
+  });
+  it("each column has its ready strips with the command and a Copy button", () => {
+    const box = render();
+    const strips = (id: string) => [...box.querySelectorAll(`[data-person=${id}] [data-ready]`)];
+    expect(strips("r1").map((s) => s.querySelector("p")!.textContent)).toEqual([
+      "4 comments ready to fix on Greensprings Longevity",
+      "1 comment ready to fix on Alexis Art",
+    ]);
+    expect(strips("r1")[0].querySelector("code")!.textContent).toBe("/tap-to-fix:fix alexis greensprings");
+    expect(strips("r1")[0].querySelector("[data-copy]")!.textContent).toBe("Copy");
+    expect(strips("r2").map((s) => s.querySelector("code")!.textContent)).toEqual(["/tap-to-fix:fix ben greensprings"]);
+  });
+  it("the header shows the open count and the link state", () => {
+    const box = render();
+    expect(box.querySelector("[data-person=r1] .person-h")!.textContent).toContain("5 open comments · link on");
+    expect(box.querySelector("[data-person=r2] .person-h")!.textContent).toContain("1 open comment · link on");
+  });
+  it("a revoked reviewer's subline says Link off", () => {
+    const box = render({ overview: { ...overview, reviewers: [overview.reviewers[0], { ...BEN, revoked: true }] } });
+    expect(box.querySelector("[data-person=r2] .person-h")!.textContent).toContain("Link off");
+    expect(box.querySelector("[data-person=r1] .person-h")!.textContent).not.toContain("Link off");
+  });
+  it("pages show the status chip, the counts, the Page link and a remove button", () => {
+    const row = render().querySelector("[data-row=p2]")!;
+    expect(row.querySelector(".tu")!.textContent).toBe("Greensprings Longevity /digital-detox");
+    expect(row.querySelector(".st")!.textContent).toBe("Open");
+    expect(row.querySelector(".counts")!.innerHTML).toBe("<b>1 open</b> · 2 settled");
+    expect(row.querySelector("a.lnk")!.getAttribute("href")).toBe("https://greensprings.life/digital-detox");
+    expect(row.querySelector("[data-action=remove]")!.getAttribute("aria-label")).toBe("Remove Digital Detox Retreat from Alexis's list");
+  });
+  it("Assign a page to <First> at the end of each column", () => {
+    const box = render();
+    const btn = (id: string) => box.querySelector(`[data-person=${id}] [data-action=assign]`)!;
+    expect(btn("r1").textContent).toBe("Assign a page to Alexis");
+    expect(btn("r1").getAttribute("data-id")).toBe("r1");
+    expect(btn("r2").textContent).toBe("Assign a page to Ben");
+  });
+  it("the top bar has Add a reviewer", () => {
+    expect(render().querySelector(".top [data-adder=reviewer] > summary")!.textContent).toBe("Add a reviewer");
+  });
+  it("sites list at the bottom: name, host and page count, with the slug kept", () => {
+    const box = render();
+    const rows = [...box.querySelectorAll("[data-sites] .siterow")];
+    expect(rows.map((r) => r.querySelector(".tu")!.textContent)).toEqual([
+      "bonusdecade.com · 2 pages",
+      "greensprings.life · 3 pages",
+      "art.greensprings.life · 1 page",
+    ]);
+    expect(rows[1].querySelector("b")!.textContent).toBe("Greensprings Longevity");
+    expect(rows[1].textContent).toContain("greensprings");
+    expect(rows[1].textContent).toContain("workingBen/longevity-tracker");
+    expect(box.querySelector(".sites [data-adder=site] > summary")!.textContent).toBe("Add a site");
+  });
+  it("no table remains", () => {
+    expect(render().querySelector("table")).toBeNull();
   });
 });
 

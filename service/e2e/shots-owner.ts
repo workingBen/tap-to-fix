@@ -31,25 +31,26 @@ try {
   for (const a of seeded.assignments) await owner("DELETE", `/assignments/${a.id}`);
   const alexis = { id: process.env.TTF_REVIEWER_ID!, token: process.env.TTF_TOKEN! };
 
-  await owner("POST", "/sites", { slug: "bonus-decade", name: "Bonus Decade", origin: "https://bonusdecade.com", repo: "workingBen/longevity-tracker" });
+  // Seeded like the design-review mockup (1-dashboard-B): two reviewers, three sites, six pages.
+  // The setup's "Fixture" site and "Alexis" reviewer cannot be deleted, so they stand in for
+  // the mockup's Alexis Art and Alexis Rivera.
   await owner("POST", "/sites", { slug: "greensprings", name: "Greensprings Longevity", origin: "https://greensprings.life", repo: "workingBen/longevity-tracker" });
-  const chris = await owner<{ id: string; token: string }>("POST", "/reviewers", { name: "Chris Tosswill" });
-  const john = await owner<{ id: string; token: string }>("POST", "/reviewers", { name: "John Pellow" });
+  await owner("POST", "/sites", { slug: "bonus-decade", name: "Bonus Decade", origin: "https://bonusdecade.com", repo: "workingBen/longevity-tracker" });
+  const ben = await owner<{ id: string; token: string }>("POST", "/reviewers", { name: "Ben Pellow" });
 
   type Seed = { who: { id: string; token: string }; site: string; path: string; title: string; after: (string | null)[]; pr?: string };
   const PR = "https://github.com/workingBen/longevity-tracker/pull/";
-  // `after`: one entry per comment; null leaves it open.
+  // `after`: one entry per comment; null leaves it open. Oldest first, so the overview lists them newest first.
   const seeds: Seed[] = [
-    { who: alexis, site: "bonus-decade", path: "/protocols/sauna", title: "Sauna protocol", after: [null, null, null, null, "done"], pr: PR + "712" },
-    { who: alexis, site: "bonus-decade", path: "/", title: "Home page", after: [null, null] },
-    { who: alexis, site: "greensprings", path: "/digital-detox", title: "Digital Detox Retreat", after: [null, null, "in_progress"] },
-    { who: alexis, site: "greensprings", path: "/reports/emf/2026-loft-assessment-with-a-long-path", title: "EMF report for the loft, with a long title that wraps", after: [] },
-    { who: chris, site: "bonus-decade", path: "/protocols/cold-plunge", title: "Cold plunge guide", after: ["in_progress", "done", "done"], pr: PR + "715" },
-    { who: chris, site: "greensprings", path: "/stack-test", title: "The Stack Test", after: ["done", "done"], pr: PR + "698" },
-    { who: john, site: "bonus-decade", path: "/protocols/red-light", title: "Red light therapy", after: [] },
-    { who: john, site: "greensprings", path: "/gifts", title: "Gifts buying club", after: ["kept"] },
+    { who: alexis, site: "greensprings", path: "/virtual-emf-assessment", title: "Virtual EMF Assessment", after: [null, null, null, "in_progress"] },
+    { who: alexis, site: "greensprings", path: "/digital-detox", title: "Digital Detox Retreat", after: [null, "done", "done"], pr: PR + "712" },
+    { who: alexis, site: "bonus-decade", path: "/protocols/sauna", title: "Sauna protocol", after: [] },
+    { who: ben, site: "bonus-decade", path: "/", title: "Home page", after: ["done", "done"], pr: PR + "706" },
+    { who: ben, site: "greensprings", path: "/gifts", title: "Gifts buying club", after: [null, "in_progress"] },
+    { who: alexis, site: "fixture", path: "/index.html", title: "Gallery", after: [null] },
   ];
   for (const s of seeds) {
+    await new Promise((r) => setTimeout(r, 5)); // distinct created_at, so the order is stable
     await owner("POST", "/assignments", { site: s.site, reviewer_id: s.who.id, path: s.path, title: s.title });
     for (const [i, status] of s.after.entries()) {
       const form = new FormData();
@@ -66,7 +67,6 @@ try {
       }
     }
   }
-  await owner("POST", `/reviewers/${john.id}/revoke`);
 
   const browser = await chromium.launch();
   for (const [name, viewport, mobile] of [
@@ -77,12 +77,20 @@ try {
     const ctx = await browser.newContext({ viewport, deviceScaleFactor: mobile ? 3 : 1, isMobile: mobile, hasTouch: mobile });
     const page = await ctx.newPage();
     await page.goto(`${SERVICE}/o/#owner=${encodeURIComponent(OWNER_TOKEN)}`);
-    await page.locator("tr[data-row]").first().waitFor();
+    await page.locator("[data-person] [data-row]").first().waitFor();
     const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
     if (overflow) console.warn(`${name}: horizontal overflow`);
     console.log("MEASURE", name, JSON.stringify(await measure(page)));
     await page.screenshot({ path: join(out, name), fullPage: true });
 
+    if (!mobile && viewport.width === 1440) {
+      // The more menu open, and the stand-in assign form.
+      await page.locator("[data-person] details.more > summary").first().click();
+      await page.screenshot({ path: join(out, "o-menu-1440.png") });
+      await page.locator("[data-person] details.more > summary").first().click();
+      await page.locator("[data-person] [data-action=assign]").nth(1).click();
+      await page.screenshot({ path: join(out, "o-assign-1440.png"), fullPage: true });
+    }
     if (mobile) {
       // The link flash after adding a reviewer.
       await page.locator("[data-adder=reviewer] > summary").click();
