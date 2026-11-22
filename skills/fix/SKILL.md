@@ -1,13 +1,13 @@
 ---
 name: fix
-description: Use when the user runs /tap-to-fix:fix <reviewer> <site>, or asks to fix, work through or go over a reviewer's tap-to-fix comments ("fix Alexis's comments", "work Alexis's comments on the main site"), or a handoff says to run /tap-to-fix:fix … --resume. Pulls that reviewer's open comments and screenshots for one site, runs them as a proofs review cycle, and reports each comment's status back to the service as the cycle works.
+description: Use when the user runs /tap-to-fix:fix <reviewer> <site> (or /tap-to-fix:fix alone, to pick a batch from everything waiting), or asks to fix, work through or go over a reviewer's tap-to-fix comments ("fix Alexis's comments", "work Alexis's comments on the main site"), or a handoff says to run /tap-to-fix:fix … --resume. Pulls that reviewer's open comments and screenshots for one site, runs them as a proofs review cycle, and reports each comment's status back to the service as the cycle works.
 ---
 
 # tap-to-fix: fix one reviewer's comments
 
 Turns one reviewer's open comments on one site into a `proofs:review-cycle` session. Each comment's status on the service keeps pace with what the cycle does, so the reviewer can watch progress on their own list.
 
-Arguments: `<reviewer>` (an id, a full-name slug such as `alexis-rivera`, or a first name), `<site>` (the site slug), and optionally `--resume`. If the reviewer or the site is missing, ask for it once, then go.
+Arguments: `<reviewer>` (an id, a full-name slug such as `alexis-rivera`, or a first name), `<site>` (the site slug), and optionally `--resume`. With no arguments, or with only a reviewer, step 2 lists what is waiting and asks which batch to work.
 
 ## The CLI path — resolve it once
 
@@ -38,9 +38,32 @@ Exit codes for every CLI call: `0` ok, `1` error (the message is on stderr), `2`
    - The CLI also accepts `TTF_SERVICE` plus `TTF_OWNER_TOKEN` from the environment. If the user says those are set, carry on; a CLI error that names the config means they are not.
    - Every status call needs the sign-in, even offline, so do not continue without it.
 
-## 2. Pull the batch (skip with `--resume`)
+## 2. Pick a batch (no arguments, or only a reviewer)
 
-**With `--resume`:** skip this step. Run `node <TTF> progress <reviewer> <site>` and go to step 3 with the folder it prints. If it exits `1` (no local folder: another machine, a sandbox, a cleared home folder or a dead session), pull with `node <TTF> batch <reviewer> <site> --status open,in_progress` instead of the plain pull below, so comments an earlier run already marked in progress are not stranded. Tell the cycle that some of the `in_progress` items may already be parked in a design review or waiting on an answer: check with Ben, or keep them `in_progress`, rather than redoing the work.
+Skip this step when both `<reviewer>` and `<site>` were given. Otherwise list every comment that is not settled yet:
+
+```bash
+node <TTF> open
+```
+
+With only a reviewer, list just theirs: `node <TTF> open <reviewer>`.
+
+- **Exit `2`:** show the matches it printed and stop. Do not guess.
+- **Exit `1`:** show the error and stop.
+- **Exit `0`, and the output starts with `Nothing waiting`:** say so and stop.
+- **Exit `0` otherwise:** show the output to the user in a code block, as printed. Each batch starts with a header line `<Name> · <Site name> (<site slug>) · <N> waiting` and ends with `Run: /tap-to-fix:fix <reviewer> <site>`. Batches are printed most comments first.
+
+Then ask which batch to work with the **AskUserQuestion** tool, never in prose:
+
+- One question, header `Batch`, text *"Which batch should I fix?"*
+- One option per batch, in the printed order (most comments first). Label: `<Name> · <site slug> (<N>)`, for example `Alexis Rivera · greensprings (3)`. Description: the page paths in that batch.
+- AskUserQuestion takes two to four options. More than four batches: offer the first four; the user can name any other through the tool's own free-text answer. Only one batch: offer it plus `Not now`.
+
+On `Not now`, stop. Otherwise take the reviewer and site from the chosen batch's `Run:` line and carry on at step 3 exactly as if the user had typed that command. Use those two values everywhere below that says `<reviewer>` and `<site>`.
+
+## 3. Pull the batch (skip with `--resume`)
+
+**With `--resume`:** skip this step. Run `node <TTF> progress <reviewer> <site>` and go to step 4 with the folder it prints. If it exits `1` (no local folder: another machine, a sandbox, a cleared home folder or a dead session), pull with `node <TTF> batch <reviewer> <site> --status open,in_progress` instead of the plain pull below, so comments an earlier run already marked in progress are not stranded. Tell the cycle that some of the `in_progress` items may already be parked in a design review or waiting on an answer: check with Ben, or keep them `in_progress`, rather than redoing the work.
 
 **Otherwise:**
 
@@ -56,7 +79,7 @@ If the user hands you a batch file downloaded from the owner dashboard, or the n
 
 The folder holds `batch.json`, `queue.md` and `shots/`. If a comment's screenshot could not be fetched, it has `screenshot: "missing"`. Work it anyway, from the page URL, the selector and the element text.
 
-## 3. Repo check — before any code is touched
+## 4. Repo check — before any code is touched
 
 The site's repo is `site.repo` in `batch.json`. It must match this checkout's `origin`, both written as `owner/name`. Put the literal folder path in place of `<folder>`:
 
@@ -76,11 +99,11 @@ console.log("Repo OK: " + have);
 - **Exit `3` (`Wrong repo:`):** stop and say: *"These comments are for `<site.repo>`. Open that repo and run `/tap-to-fix:fix <reviewer> <site>` there."* Set no statuses and edit nothing.
 - **Any other exit (for example a stack trace):** the check could not run. Stop, show the error and say you could not check the repo. Never report a crash as "wrong repo".
 
-## 4. Nothing to do
+## 5. Nothing to do
 
 If the item count is `0` (with `--resume`: nothing is "not final"), say *"<Reviewer> has no open comments on <site>."* and stop.
 
-## 5. Run the review cycle
+## 6. Run the review cycle
 
 Invoke `proofs:review-cycle` with the items from `<folder>/queue.md` as the opening batch. With `--resume`, give it only the items whose comment id `progress` lists as `not final`. Tell it the following:
 
@@ -99,7 +122,7 @@ Review-cycle's own rules still apply in this repo, unchanged:
 
 This skill only adds the status calls; it changes nothing in proofs.
 
-## 6. Status rules — one call per transition, as it happens
+## 7. Status rules — one call per transition, as it happens
 
 | When, in the cycle | Call |
 |---|---|
@@ -114,7 +137,7 @@ This skill only adds the status calls; it changes nothing in proofs.
 - **`Queued (offline): …` counts as success.** The CLI sends it later. Keep going.
 - **If a call exits `1` and prints `owner token rejected — re-run /tap-to-fix:setup`** (or an error that names the config): stop making status calls. Tell the user once to re-run `/tap-to-fix:setup`, then keep working the queue. Any other exit `1`: note it on that item's card, keep going, and do not retry in a loop.
 
-## 7. Finish
+## 8. Finish
 
 1. **Send anything queued offline:** run `node <TTF> flush`. If it exits `1`, some changes are still queued (the network is still down). Say so, and say that running `flush` again later sends them. A rejected line is saved in its folder's `rejected-status.jsonl`; name each one and give the reason.
 2. **List what is still open:** run `node <TTF> progress <reviewer> <site>`. List every comment it shows as `not final` with its page, a few words of its body, and why. Possible reasons: not reached; flagged; waiting on a review page (give the link); status call failed; still queued offline.

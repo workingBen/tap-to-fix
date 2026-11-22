@@ -37,8 +37,26 @@ Scripts calling the API should send a normal user agent: Cloudflare answers Pyth
 /plugin marketplace add workingBen/tap-to-fix
 /plugin install tap-to-fix@tap-to-fix
 /tap-to-fix:setup                      # saves the service URL and owner token
+/tap-to-fix:list                       # every comment not settled yet, by reviewer, site and page
+/tap-to-fix:fix                        # pick a batch from that list, then work it
 /tap-to-fix:fix alexis bonus-decade    # one reviewer's open comments on one site, as a review cycle
 ```
+
+`/tap-to-fix:list` runs `ttf open`, which prints every comment that is still open or in progress, grouped by reviewer, then site, then page, with each one's status, age and the start of its text. Each reviewer + site batch ends with the command that fixes it:
+
+```
+Alexis Rivera · Greensprings (greensprings) · 3 waiting
+  /about
+    in progress  2 days ago   Wrong color
+    open         3 h ago      The heading is far too small on a phone and the line wraps …
+  /
+    open         5 min ago    Logo is blurry
+  Run: /tap-to-fix:fix alexis greensprings
+
+3 comments waiting in 1 batch.
+```
+
+When nothing is waiting it says so. `/tap-to-fix:fix` with no arguments (or with only a reviewer, such as `/tap-to-fix:fix alexis`) shows the same list, then asks which batch to work with one choice per reviewer + site, most comments first, and carries on with the one you pick. The CLI works on its own too: `node bin/ttf.mjs open [reviewer]`.
 
 `/tap-to-fix:fix` downloads the batch (comments and screenshots) to `~/.tap-to-fix/batches/`, marks each comment in progress as work on it starts, and done with its PR link after merge. `--resume` picks up an interrupted run.
 
