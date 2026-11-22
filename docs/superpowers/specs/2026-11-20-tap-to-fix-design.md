@@ -4,7 +4,7 @@
 
 ## Why
 
-Ben's reviewers (his wife Alexis first) find problems on his sites from their phones. Today they text him screenshots plus a message per problem, and he relays those into a Claude Code review cycle by hand. The spot on the page each comment is about gets lost on the way, so Claude has to re-find the element, and Ben is the bottleneck.
+Ben's reviewers (Alexis first) find problems on his sites from their phones. Today they text him screenshots plus a message per problem, and he relays those into a Claude Code review cycle by hand. The spot on the page each comment is about gets lost on the way, so Claude has to re-find the element, and Ben is the bottleneck.
 
 tap-to-fix lets a reviewer tap the exact spot on the live page, type a comment, and have it land, with a screenshot and the precise location, in a queue Ben works through with Claude in a review cycle. Ben assigns pages to specific reviewers; each reviewer has their own dashboard showing what to review and what has changed since they last looked.
 
