@@ -36,6 +36,15 @@ svg { flex: none; }
 }
 .bar a:focus-visible, .sheet button:focus-visible, .pin:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
 .bar .msg svg { color: var(--warn); }
+.bar .seg { display: inline-flex; flex: none; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+.root .bar .seg button {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--mut); font-weight: 600; white-space: nowrap; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.root .bar .seg button * { color: inherit; }
+.root .bar .seg button.on { background: var(--acc); color: #fff; }
+.bar .seg button:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
 .bar .vr { width: 1px; align-self: stretch; background: var(--line); margin: 6px 2px; flex: none; }
 /* "Saved" floats just above the pill, so it never widens it. */
 .root .bar .saved {

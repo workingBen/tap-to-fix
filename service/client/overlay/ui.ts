@@ -1,5 +1,6 @@
 import type { Status } from "./api";
 import { OVERLAY_CSS } from "./styles";
+import type { Mode } from "./mode";
 import { PIN_BODY_CX, PIN_BODY_CY, PIN_FLIP_MARGIN, pinPath, type Dir } from "./pin-shape";
 
 export const STATUS_LABELS: Record<Status, string> = {
@@ -46,6 +47,8 @@ function icon(paths: string[]): SVGSVGElement {
   return svg;
 }
 const ALERT_ICON = ["M12 3l9.5 17h-19z", "M12 10v4", "M12 17.5v.01"];
+const PEN_ICON = ["M4 20h4L19 9l-4-4L4 16z", "M13.5 6.5l4 4"];
+const POINTER_ICON = ["M5 3l14 7-6.5 2L10 19z"];
 const CHECK_ICON = ["M5 12.5l4.5 4.5L19 7.5"];
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -83,6 +86,8 @@ export class OverlayUI {
   /** Asked before a user-initiated close (Cancel, Escape); false keeps the sheet open. */
   private mayDismiss: (() => boolean) | null = null;
   onPinTap: (n: number) => void = () => {};
+  onModeChange: (m: Mode) => void = () => {};
+  private mode: Mode = "comment";
 
   constructor(private readonly doc: Document, private readonly dashboardUrl: string) {
     this.host = doc.createElement("tap-to-fix-overlay");
@@ -96,7 +101,7 @@ export class OverlayUI {
     this.pinsLayer = el("div", { class: "pins", "data-ttf": "pins" });
     this.sheet = el("div", { class: "sheet", "data-ttf": "sheet", role: "dialog", "aria-modal": "false" });
     this.sheet.hidden = true;
-    this.root = el("div", { class: "root" }, this.pinsLayer, this.bar, this.sheet);
+    this.root = el("div", { class: "root", "data-mode": "comment" }, this.pinsLayer, this.bar, this.sheet);
     shadow.append(style, this.root);
     // Keystrokes in the comment box reach the page retargeted to this host, so the page's
     // "ignore keys while typing in a field" checks miss them and its shortcuts would fire.
@@ -116,9 +121,9 @@ export class OverlayUI {
         content = [el("span", { class: "msg" }, "Opening your review…")];
         break;
       case "reviewing":
-        // Task 3 puts the mode group between the count and the divider.
         content = [
           el("span", { class: "msg count", "data-ttf": "count" }, el("b", {}, "Reviewing"), ` · ${countLabel(state.count)}`),
+          this.modeGroup(),
           el("span", { class: "vr", "aria-hidden": "true" }),
           link("Done"),
         ];
@@ -139,6 +144,39 @@ export class OverlayUI {
     const saved = state.kind === "reviewing" && !!state.saved;
     if (saved && !this.savedNote.textContent) this.savedNote.replaceChildren(icon(CHECK_ICON), "Saved");
     if (!saved) this.savedNote.replaceChildren();
+  }
+
+  /** The Comment / Use the page switch. Built fresh on every bar render, so no listener outlives its button. */
+  private modeGroup(): HTMLElement {
+    const seg = (m: Mode, paths: string[], label: string) => {
+      const b = el("button", { type: "button", "data-mode": m }, icon(paths), el("span", {}, label));
+      b.addEventListener("click", () => {
+        if (this.mode !== m) this.onModeChange(m);
+      });
+      return b;
+    };
+    const group = el(
+      "div",
+      { class: "seg", role: "group", "aria-label": "Mode", "data-ttf": "mode" },
+      seg("comment", PEN_ICON, "Comment"),
+      seg("use", POINTER_ICON, "Use the page"),
+    );
+    this.paintMode(group);
+    return group;
+  }
+
+  private paintMode(group: ParentNode): void {
+    for (const b of group.querySelectorAll("button[data-mode]")) {
+      const on = b.getAttribute("data-mode") === this.mode;
+      b.setAttribute("aria-pressed", String(on));
+      b.classList.toggle("on", on);
+    }
+  }
+
+  setMode(m: Mode): void {
+    this.mode = m;
+    this.root.setAttribute("data-mode", m);
+    this.paintMode(this.bar);
   }
 
   setPins(pins: PinView[]): void {

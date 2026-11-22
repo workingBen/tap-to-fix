@@ -1,6 +1,7 @@
 import { fetchPageComments, postComment, type PageComment } from "./api";
 import { describeElement, findPin, locatorFor, type Locator } from "./locate";
 import { takeScreenshot } from "./shot";
+import { readMode, saveMode, type Mode } from "./mode";
 import { isSettled, OverlayUI, type PinView } from "./ui";
 
 /** How long Save waits for the screenshot before sending the comment without it. */
@@ -98,6 +99,7 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
 
   function review(comments: PageComment[]): void {
     let draft: Draft | null = null;
+    let mode: Mode = readMode(win);
     let placed: (PinView & { comment: PageComment })[] = [];
 
     const render = () => {
@@ -119,6 +121,14 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       clearTimeout(savedTimer);
       savedTimer = setTimeout(updateBar, SAVED_NOTICE_MS);
       updateBar();
+    };
+
+    ui.setMode(mode);
+    ui.onModeChange = (m) => {
+      mode = m;
+      saveMode(win, m);
+      ui.setMode(m);
+      down = null;
     };
 
     ui.onPinTap = (n) => {
@@ -221,12 +231,12 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     let down: { id: number; x: number; y: number; t: number; target: Element } | null = null;
     let lastPointerUp = -Infinity;
     const onPointerDown = (e: PointerEvent) => {
-      if (inOverlay(e)) return;
+      if (mode === "use" || inOverlay(e)) return;
       hide(e); // never preventDefault here: the page must still scroll
       down = e.isPrimary && e.button <= 0 ? { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, target: targetOf(e) } : null;
     };
     const onPointerUp = (e: PointerEvent) => {
-      if (inOverlay(e)) return;
+      if (mode === "use" || inOverlay(e)) return;
       hide(e);
       lastPointerUp = e.timeStamp;
       const d = down;
@@ -239,7 +249,7 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       down = null; // the browser took the gesture over (a scroll or zoom)
     };
     const onClick = (e: MouseEvent) => {
-      if (inOverlay(e)) return;
+      if (mode === "use" || inOverlay(e)) return;
       // Reviewing: a tap on the page marks a spot; it never follows a link or submits a form.
       e.preventDefault();
       hide(e);
@@ -255,7 +265,7 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       tap(target, clientX, clientY);
     };
     const onOtherInput = (e: Event) => {
-      if (inOverlay(e)) return;
+      if (mode === "use" || inOverlay(e)) return;
       hide(e); // page handlers never see a review tap
       // A touch's compatibility mousedown arrives after the tap opened the sheet; its default
       // action would move focus off the comment box. (touchstart is never prevented: scrolling.)

@@ -56,6 +56,75 @@ test("phone pill is one line without the count; desktop shows the count @desktop
   await expect(count).toContainText("0 comments");
 });
 
+const modeGroup = (page: Page) => overlay(page).getByRole("group", { name: "Mode" });
+const comment = (page: Page) => modeGroup(page).getByRole("button", { name: "Comment" });
+const usePage = (page: Page) => modeGroup(page).getByRole("button", { name: "Use the page" });
+
+test("starts in Comment mode with Comment pressed", async ({ page }) => {
+  await openReady(page);
+  await expect(comment(page)).toHaveAttribute("aria-pressed", "true");
+  await expect(usePage(page)).toHaveAttribute("aria-pressed", "false");
+  const m = await bar(page).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { h: r.height, w: r.width, vw: innerWidth };
+  });
+  expect(m.h).toBeLessThan(64);
+  expect(m.w).toBeLessThanOrEqual(m.vw - 16);
+  for (const b of [comment(page), usePage(page)]) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+});
+
+test("Use the page lets the page's own controls work", async ({ page }) => {
+  await openReady(page);
+  await usePage(page).tap();
+  await expect(usePage(page)).toHaveAttribute("aria-pressed", "true");
+  await page.locator("#counter").tap();
+  await expect(page.locator("#counter")).toHaveText("1");
+  await page.locator("#tab-b").tap();
+  await expect(page.locator("#panel-b")).toBeVisible();
+  await page.locator("summary").tap();
+  await expect(page.locator("#more")).toHaveAttribute("open", "");
+  await expect(sheet(page)).toBeHidden();
+  await expect(pins(page)).toHaveCount(0);
+  await comment(page).tap();
+  await expect(comment(page)).toHaveAttribute("aria-pressed", "true");
+  await page.locator("#counter").tap();
+  await expect(page.locator("#counter")).toHaveText("1");
+  await expect(sheet(page)).toBeVisible();
+});
+
+test("the mode survives the bar re-rendering when Saved flashes", async ({ page }) => {
+  const r = await freshReviewer("Mode rerender");
+  await openAsReviewer(page, "/index.html", r.token);
+  await expect(bar(page)).toContainText("Reviewing");
+  await page.locator("h1").tap();
+  await sheet(page).locator("textarea").fill("Check the heading");
+  await sheet(page).getByRole("button", { name: "Save comment" }).tap();
+  await expect(bar(page)).toContainText("Saved");
+  await expect(modeGroup(page)).toHaveCount(1);
+  await expect(comment(page)).toHaveAttribute("aria-pressed", "true");
+  await usePage(page).tap();
+  // The Saved notice clears on a timer, which re-renders the bar again.
+  await expect(bar(page)).not.toContainText("Saved");
+  await expect(modeGroup(page)).toHaveCount(1);
+  await expect(usePage(page)).toHaveAttribute("aria-pressed", "true");
+  await expect(overlay(page).locator(".root")).toHaveAttribute("data-mode", "use");
+  await usePage(page).tap(); // still responds after re-renders
+  await comment(page).tap();
+  await expect(overlay(page).locator(".root")).toHaveAttribute("data-mode", "comment");
+});
+
+test("Use the page follows links and the mode is remembered on the next page", async ({ page }) => {
+  const r = await freshReviewer("Mode traveler");
+  await owner("POST", "/assignments", { site: "fixture", reviewer_id: r.id, path: "/other.html", title: "Fixture other" });
+  await openAsReviewer(page, "/index.html", r.token);
+  await expect(bar(page)).toContainText("Reviewing");
+  await usePage(page).tap();
+  await page.locator("#other-link").tap();
+  await page.waitForURL("**/other.html");
+  await expect(bar(page)).toContainText("Reviewing");
+  await expect(usePage(page)).toHaveAttribute("aria-pressed", "true");
+});
+
 test("ordinary visitor sees nothing", async ({ page }) => {
   const serviceRequests: string[] = [];
   page.on("request", (r) => {
