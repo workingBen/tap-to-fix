@@ -80,7 +80,7 @@ export function renderReviewer(data: MeResponse): string {
   const first = firstName(data.name);
   const head =
     `<h1 class="hello">${first ? `Hi ${escapeHtml(first)}.` : "Hi."}</h1>` +
-    `<p class="lede">Tap a page to open it, then tap anything on it that should change.</p>`;
+    `<p class="lede">Tap a page to open it. Then tap Comment, and tap anything that should change.</p>`;
   if (data.assignments.length === 0) return head + `<p class="empty">${MSG_EMPTY}</p>`;
 
   // Group by site, keeping the order sites first appear in.

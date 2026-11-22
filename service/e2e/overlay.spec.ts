@@ -26,6 +26,23 @@ async function openAsReviewer(page: Page, path = "/index.html", t = token()): Pr
   await page.goto(`${path}#ttf=${encodeURIComponent(t)}`);
 }
 
+/**
+ * A fresh tab starts in Use the page. Most tests here are about commenting, so each one's tab
+ * starts with Comment already chosen, as if the reviewer had tapped it. Only an empty slot is
+ * filled, so a mode the test picks is still remembered across pages. Tests tagged @fresh-tab
+ * get a tab with nothing stored.
+ */
+test.beforeEach(async ({ page }, testInfo) => {
+  if (testInfo.tags.includes("@fresh-tab")) return;
+  await page.addInitScript(() => {
+    try {
+      if (!sessionStorage.getItem("ttf:mode")) sessionStorage.setItem("ttf:mode", "comment");
+    } catch {
+      // about:blank and other opaque origins have no storage.
+    }
+  });
+});
+
 async function openReady(page: Page): Promise<void> {
   await openAsReviewer(page);
   await expect(bar(page)).toContainText("Reviewing");
@@ -60,10 +77,11 @@ const modeGroup = (page: Page) => overlay(page).getByRole("group", { name: "Mode
 const comment = (page: Page) => modeGroup(page).getByRole("button", { name: "Comment" });
 const usePage = (page: Page) => modeGroup(page).getByRole("button", { name: "Use the page" });
 
-test("starts in Comment mode with Comment pressed", async ({ page }) => {
+test("a fresh tab starts in Use the page with Use the page pressed", { tag: "@fresh-tab" }, async ({ page }) => {
   await openReady(page);
-  await expect(comment(page)).toHaveAttribute("aria-pressed", "true");
-  await expect(usePage(page)).toHaveAttribute("aria-pressed", "false");
+  await expect(usePage(page)).toHaveAttribute("aria-pressed", "true");
+  await expect(comment(page)).toHaveAttribute("aria-pressed", "false");
+  await expect(overlay(page).locator(".root")).toHaveAttribute("data-mode", "use");
   const m = await bar(page).evaluate((el) => {
     const r = el.getBoundingClientRect();
     return { h: r.height, w: r.width, vw: innerWidth };
@@ -71,6 +89,35 @@ test("starts in Comment mode with Comment pressed", async ({ page }) => {
   expect(m.h).toBeLessThan(64);
   expect(m.w).toBeLessThanOrEqual(m.vw - 16);
   for (const b of [comment(page), usePage(page)]) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
+});
+
+test("in a fresh tab a tap works the page; no comment sheet until Comment is pressed", { tag: "@fresh-tab" }, async ({ page }) => {
+  await openReady(page);
+  await page.locator("#counter").tap();
+  await expect(page.locator("#counter")).toHaveText("1");
+  await page.locator("h1").tap();
+  await expect(sheet(page)).toBeHidden();
+  await expect(pins(page)).toHaveCount(0);
+  await comment(page).tap();
+  await expect(comment(page)).toHaveAttribute("aria-pressed", "true");
+  await page.locator("h1").tap();
+  await expect(sheet(page)).toBeVisible();
+});
+
+test("Comment, once picked, is remembered on the next page in the tab", { tag: "@fresh-tab" }, async ({ page }) => {
+  const r = await freshReviewer("Comment traveler");
+  await owner("POST", "/assignments", { site: "fixture", reviewer_id: r.id, path: "/other.html", title: "Fixture other" });
+  await openAsReviewer(page, "/index.html", r.token);
+  await expect(bar(page)).toContainText("Reviewing");
+  // Follow the link in Use the page, then switch to Comment on the second page.
+  await page.locator("#other-link").tap();
+  await page.waitForURL("**/other.html");
+  await expect(bar(page)).toContainText("Reviewing");
+  await expect(usePage(page)).toHaveAttribute("aria-pressed", "true");
+  await comment(page).tap();
+  await page.goto("/index.html"); // the token is already in this tab's storage
+  await expect(bar(page)).toContainText("Reviewing");
+  await expect(comment(page)).toHaveAttribute("aria-pressed", "true");
 });
 
 test("on a 375px phone the reviewing pill is one line and fits", async ({ page }) => {

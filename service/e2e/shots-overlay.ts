@@ -47,6 +47,7 @@ try {
       await page.screenshot({ path: join(out, name) });
     };
 
+    await press(overlay.getByRole("button", { name: "Comment" })); // a fresh tab starts in Use the page
     await tap("h1");
     await sheet.waitFor();
     await sheet.locator("textarea").fill("The heading is too small to read from across the room. Can it be bigger?");
@@ -105,17 +106,18 @@ try {
     const page = await ctx.newPage();
     await page.goto(`${FIXTURE}/index.html#ttf=${encodeURIComponent(rv.token)}`);
     const overlay = page.locator("tap-to-fix-overlay");
-    await overlay.getByRole("button", { name: "Comment" }).waitFor();
+    // A fresh tab starts in Use the page; shoot that, then switch to Comment.
+    const commentBtn = overlay.getByRole("button", { name: "Comment" });
+    await commentBtn.waitFor();
     const h1 = (await page.locator("h1").boundingBox())!;
     if (!mobile) await page.mouse.move(h1.x + Math.min(h1.width / 2, 220), h1.y + h1.height / 2);
     await page.waitForTimeout(500);
-    await page.screenshot({ path: join(modeOut, `overlay-${device}-comment.png`) });
-    const useBtn = overlay.getByRole("button", { name: "Use the page" });
-    if (mobile) await useBtn.tap();
-    else await useBtn.click();
+    await page.screenshot({ path: join(modeOut, `overlay-${device}-use.png`) });
+    if (mobile) await commentBtn.tap();
+    else await commentBtn.click();
     if (!mobile) await page.mouse.move(h1.x + Math.min(h1.width / 2, 220), h1.y + h1.height / 2);
     await page.waitForTimeout(500);
-    await page.screenshot({ path: join(modeOut, `overlay-${device}-use.png`) });
+    await page.screenshot({ path: join(modeOut, `overlay-${device}-comment.png`) });
     await ctx.close();
   }
   await browser.close();

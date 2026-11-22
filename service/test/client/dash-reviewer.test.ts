@@ -56,7 +56,7 @@ describe("renderReviewer", () => {
   it("greets by first name", () => {
     const html = renderReviewer({ name: "Alexis Rivera", assignments: [assignment()] });
     expect(html).toContain("Hi Alexis.");
-    expect(html).toContain("Tap a page to open it, then tap anything on it that should change.");
+    expect(html).toContain("Tap a page to open it. Then tap Comment, and tap anything that should change.");
   });
   it("escapes titles", () => {
     const html = renderReviewer({ name: "Alexis", assignments: [assignment({ title: "<script>alert(1)</script>" })] });
