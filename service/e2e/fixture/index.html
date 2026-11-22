@@ -21,6 +21,9 @@
     <li>Second thing to review</li>
   </ul>
   <p id="far" style="margin: 900px 0">Far down a long page.</p>
+  <!-- A lazy image far below the fold never loads; it must not hold up a screenshot. -->
+  <div style="height:3000px"></div>
+  <img loading="lazy" src="http://localhost:4174/photo.jpg?lazy" width="240" height="160" alt="Below the fold">
   <script>
     // A typical site keyboard shortcut: ignores keys typed into fields, reacts to "/" and "j".
     document.addEventListener("keydown", (e) => {
