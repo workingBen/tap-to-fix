@@ -48,6 +48,8 @@ Everything lives in your own Cloudflare account. There is no shared or hosted se
 - **Reviewer tokens** are stored two ways. A SHA-256 hash is used to sign the reviewer in. A copy encrypted with AES-GCM, under a `LINK_KEY` Worker secret, lets the owner dashboard show the link again. Turning off a link deletes the encrypted copy.
 - **The owner token** is never in the database. It is a Worker secret, and on your machine it is in `~/.config/tap-to-fix/config.json` (mode 0600). The owner dashboard keeps it in that browser's local storage after you open the owner link.
 
+Each reviewer can save up to 20 comments a minute and 300 a day. A comment's text can be up to 5,000 characters, and its screenshot up to 1 MB. [SECURITY.md](SECURITY.md) lists every limit and how to report a vulnerability.
+
 Reviewer links carry the token in the URL fragment (`#ttf=...`). Browsers never send the fragment to your site's server, its logs, or `Referer` headers. The script tag removes it from the address bar on load.
 
 ## Requirements

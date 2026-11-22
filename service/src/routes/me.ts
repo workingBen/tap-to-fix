@@ -1,8 +1,15 @@
 import { Hono } from "hono";
+import { bodyLimit } from "hono/body-limit";
 import { createMiddleware } from "hono/factory";
 import { requireReviewer, type AppBindings } from "../auth";
 import { newId } from "../ids";
-import { MAX_SCREENSHOT_BYTES } from "../limits";
+import {
+  MAX_COMMENT_CHARS,
+  MAX_COMMENT_REQUEST_BYTES,
+  MAX_FIELD_CHARS,
+  MAX_SCREENSHOT_BYTES,
+  commentLimits,
+} from "../limits";
 import { assignmentStatus, isSettled, isUpdated, progress, type Status } from "../rollup";
 
 const me = new Hono<AppBindings>();
@@ -146,8 +153,39 @@ type CommentInput = {
 
 const str = (v: unknown) => (typeof v === "string" ? v : null);
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+/** A location field, or null when it is missing or longer than the cap. */
+const field = (v: unknown) => (typeof v === "string" && v.length <= MAX_FIELD_CHARS ? v : null);
 
-me.post("/comments", async (c) => {
+const MINUTE_MS = 60_000;
+const DAY_MS = 24 * 60 * MINUTE_MS;
+
+/** Refuses a reviewer who has saved too many comments lately (see commentLimits in ../limits). */
+const rateLimit = createMiddleware<AppBindings>(async (c, next) => {
+  const now = Date.now();
+  const row = await c.env.DB.prepare(
+    `SELECT COUNT(*) AS day, COALESCE(SUM(c.created_at > ?), 0) AS minute
+       FROM comments c JOIN assignments a ON a.id = c.assignment_id
+      WHERE a.reviewer_id = ? AND c.created_at > ?`,
+  )
+    .bind(new Date(now - MINUTE_MS).toISOString(), c.get("reviewer").id, new Date(now - DAY_MS).toISOString())
+    .first<{ day: number; minute: number }>();
+  if ((row?.minute ?? 0) >= commentLimits.perMinute) {
+    c.header("Retry-After", "60");
+    return c.json({ error: "Too many comments. Wait a minute and try again." }, 429);
+  }
+  if ((row?.day ?? 0) >= commentLimits.perDay) {
+    c.header("Retry-After", "3600");
+    return c.json({ error: "Too many comments today. Try again tomorrow." }, 429);
+  }
+  await next();
+});
+
+const commentBodyLimit = bodyLimit({
+  maxSize: MAX_COMMENT_REQUEST_BYTES,
+  onError: (c) => c.json({ error: "Request is too large" }, 413),
+});
+
+me.post("/comments", rateLimit, commentBodyLimit, async (c) => {
   let form: Record<string, string | File | (string | File)[]>;
   try {
     form = await c.req.parseBody();
@@ -163,6 +201,9 @@ me.post("/comments", async (c) => {
   if (!input || typeof input !== "object") return c.json({ error: "Invalid data" }, 400);
   const body = typeof input.body === "string" ? input.body.trim() : "";
   if (!body) return c.json({ error: "Comment body is required" }, 400);
+  if (body.length > MAX_COMMENT_CHARS) {
+    return c.json({ error: `Comment is too long (${MAX_COMMENT_CHARS} characters at most)` }, 413);
+  }
   const site = str(input.site);
   const path = str(input.path);
   if (!site || !path) return c.json({ error: "Not assigned" }, 403);
@@ -207,9 +248,9 @@ me.post("/comments", async (c) => {
   )
     .bind(
       id, row.id, body,
-      str(input.selector), str(input.element_text), num(input.element_x), num(input.element_y),
+      field(input.selector), field(input.element_text), num(input.element_x), num(input.element_y),
       num(input.page_x), num(input.page_y), num(input.viewport_w), num(input.viewport_h),
-      str(input.device), key, now,
+      field(input.device), key, now,
     )
     .run();
   return c.json({ id, screenshot }, 201);
