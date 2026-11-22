@@ -5,6 +5,6 @@ export const PAPER_CSS = `
   --acc: #2F6B4F; --acc-ink: #fff; --line: #E4DDCF; --soft: #EEF4EF;
   --warn: #9A5B13; --warn-bg: #FBEFD9; --r: 14px;
   --hf: "Iowan Old Style", "Charter", "Georgia", serif;
-  font-family: -apple-system, "Helvetica Neue", system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", system-ui, sans-serif;
 }
 `;

@@ -6,22 +6,21 @@ All notable changes to tap-to-fix are listed here. The format follows
 
 ## Unreleased
 
-### Security
-
-- Reviewer tokens in a `?ttf=` query string are refused; only the header and the `#ttf=` fragment count.
-- Saving a comment requires the site's `Origin` header.
+## 0.4.0 - 2026-11-22
 
 ### Added
 
 - MIT license.
 - A README for first-time readers: how it works, a quickstart, and what is stored where.
 - `SECURITY.md`: how to report a vulnerability, what is in scope, and every limit on reviewer writes.
-- A GitHub Actions test workflow (unit tests, typecheck and browser tests). It runs on manual
-  trigger only for now.
+- A GitHub Actions test workflow (unit tests, typecheck and browser tests) on every pull request
+  and every push to `main`.
 - `CONTRIBUTING.md` and this changelog.
 
 ### Security
 
+- Reviewer tokens in a `?ttf=` query string are refused; only the header and the `#ttf=` fragment count.
+- Saving a comment requires the site's `Origin` header.
 - New comments are capped: 5,000 characters of text, 1 MB + 64 KB per request (413 past either),
   and 2,000 characters per location field (dropped past it, comment kept).
 - Each reviewer can save 20 comments a minute and 300 a day (429 with `Retry-After` past either).

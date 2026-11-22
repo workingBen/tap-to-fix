@@ -142,7 +142,7 @@ section + section { margin-top: 40px; }
 .retry {
   display: inline-flex; align-items: center; justify-content: center; min-height: 48px; margin-top: 18px;
   padding: 0 26px; border: 0; border-radius: 999px; background: var(--acc); color: var(--acc-ink);
-  font: 600 18px/1 -apple-system, "Helvetica Neue", system-ui, sans-serif; cursor: pointer;
+  font: 600 18px/1 -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", system-ui, sans-serif; cursor: pointer;
 }
 .retry:focus-visible { outline: 3px solid var(--ink); outline-offset: 3px; }
 @media (min-width: 640px) {

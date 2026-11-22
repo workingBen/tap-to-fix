@@ -1,14 +1,9 @@
 name: test
 
-# Manual runs only for now. While the repo is private, Actions minutes come out of a paid budget.
-# When the repo goes public, replace this trigger block with:
-#
-#   on:
-#     pull_request:
-#     push:
-#       branches: [main]
-#     workflow_dispatch:
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -44,6 +39,11 @@ jobs:
 
       - name: Install Playwright browsers
         run: npx playwright install --with-deps chromium firefox
+
+      # Phone-width tests measure text. Without Roboto, Linux falls back to DejaVu Sans, which is far
+      # wider than any phone's font (San Francisco on iPhone, Roboto on Android).
+      - name: Install Roboto
+        run: sudo apt-get install -y --no-install-recommends fonts-roboto
 
       - name: Browser tests
         run: npm run e2e
