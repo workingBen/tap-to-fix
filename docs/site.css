@@ -41,8 +41,9 @@ code, pre { font-family: var(--mono); }
 .btn { background: var(--mint); color: #10261c; }
 .ghost { color: #fff; border: 1.5px solid rgba(255, 255, 255, .5); }
 .hero .ph { position: relative; justify-self: center; width: 300px; transform: rotate(4deg); }
-.note { position: absolute; left: -110px; top: 380px; width: 220px; padding: 16px 18px; border-radius: 18px; background: var(--orange); color: #fff;
+.note { position: absolute; left: -116px; top: 58px; width: 220px; padding: 16px 18px; border-radius: 18px; background: var(--orange); color: #fff;
   transform: rotate(-8deg); box-shadow: 0 16px 36px rgba(0, 0, 0, .4); font: 700 20px/1.2 var(--sans); }
+.note::after { content: ""; position: absolute; right: 18px; bottom: -14px; border: 8px solid transparent; border-top: 14px solid var(--orange); border-bottom: 0; }
 .note small { display: block; margin-bottom: 10px; font: 700 12px/1 var(--mono); letter-spacing: .06em; opacity: .75; }
 
 .phone { border: 9px solid #0d1a14; border-radius: 38px; overflow: hidden; background: #000; box-shadow: 0 24px 60px rgba(0, 0, 0, .3); }
@@ -67,12 +68,49 @@ h2 { margin: 0 0 16px; font: 700 clamp(34px, 4.4vw, 52px)/1.1 var(--serif); }
 figcaption { margin-top: 12px; color: var(--mut); font-size: 16px; }
 figcaption b { color: var(--ink); }
 
-blockquote { max-width: 760px; margin: 0 0 44px; padding: 22px 26px; border-left: 4px solid var(--orange); border-radius: 0 14px 14px 0; background: var(--surf); font: 700 24px/1.35 var(--sans); }
-blockquote cite { display: block; margin-top: 10px; color: var(--mut); font: 400 15px/1.5 var(--sans); font-style: normal; }
-.fix { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; margin: 0 0 36px; padding: 0; list-style: none; }
-.fix .phone { max-width: 280px; margin: 0 auto 18px; }
-.fix h3 { margin: 0 0 4px; font: 700 22px/1.3 var(--sans); }
-.fix p { margin: 0; color: var(--mut); }
+/* The real fix, as one looping film: before, a tap, the pin and the comment sheet, then after.
+   The pin and sheet are crops of the real comment screenshot; cqw keeps them locked to the phone's width.
+   Sheet and pin come from a shot scrolled 400px (of 2000) higher than before/after, hence the offsets. */
+.film { display: grid; grid-template-columns: 340px 1fr; gap: 64px; align-items: center; margin-top: 36px; }
+.film-phone { display: grid; justify-items: center; gap: 14px; }
+.screen { position: relative; width: 100%; max-width: 340px; aspect-ratio: 585 / 1266; container-type: inline-size; }
+.screen > img, .screen > span { position: absolute; }
+.screen > img { inset: 0; width: 100%; height: 100%; }
+.f-after { opacity: 0; animation: f-after 12s infinite; }
+.tap { left: 28cqw; top: 110cqw; width: 18cqw; height: 18cqw; margin: -9cqw 0 0 -9cqw; border-radius: 50%;
+  background: rgba(255, 255, 255, .55); opacity: 0; animation: f-tap 12s infinite; }
+.pin { left: 23cqw; top: 103.5cqw; width: 9.5cqw; height: 9.5cqw; overflow: hidden; transform-origin: 50% 100%; opacity: 0; animation: f-pin 12s infinite; }
+.pin img { position: absolute; width: 100cqw; max-width: none; left: -23cqw; top: -60.2cqw; }
+.sheet { left: 0; right: 0; bottom: 0; height: 91cqw; overflow: hidden; transform: translateY(100%); animation: f-sheet 12s infinite; }
+.sheet img { position: absolute; width: 100cqw; max-width: none; left: 0; bottom: 0; }
+@keyframes f-tap   { 0%, 14% { opacity: 0; transform: scale(.3); } 16% { opacity: 1; } 22%, 100% { opacity: 0; transform: scale(1.4); } }
+@keyframes f-pin   { 0%, 16% { opacity: 0; transform: scale(.4); } 20% { opacity: 1; transform: scale(1.1); } 22%, 60% { opacity: 1; transform: scale(1); } 66%, 100% { opacity: 0; } }
+@keyframes f-sheet { 0%, 23% { transform: translateY(100%); } 29%, 52% { transform: translateY(0); } 58%, 100% { transform: translateY(100%); } }
+@keyframes f-after { 0%, 60% { opacity: 0; } 66%, 94% { opacity: 1; } 99%, 100% { opacity: 0; } }
+
+.film-steps { margin: 0; padding: 0; list-style: none; counter-reset: fs; display: grid; gap: 26px; }
+.film-steps li { counter-increment: fs; padding-left: 20px; border-left: 4px solid var(--line); opacity: .45; animation: 12s infinite; }
+.film-steps h3 { margin: 0 0 4px; font: 700 24px/1.3 var(--sans); }
+.film-steps h3::before { content: counter(fs) ". "; color: var(--acc); }
+.film-steps p { margin: 0; color: var(--mut); }
+.film-steps q { color: var(--ink); font-weight: 700; }
+.film-steps .s1 { animation-name: f-s1; } .film-steps .s2 { animation-name: f-s2; } .film-steps .s3 { animation-name: f-s3; }
+@keyframes f-s1 { 0%, 13% { opacity: 1; border-color: var(--orange); } 16%, 99% { opacity: .45; border-color: var(--line); } }
+@keyframes f-s2 { 0%, 14% { opacity: .45; border-color: var(--line); } 17%, 58% { opacity: 1; border-color: var(--orange); } 61%, 100% { opacity: .45; border-color: var(--line); } }
+@keyframes m-s1 { 0%, 13% { opacity: 1; } 15%, 98% { opacity: 0; } 100% { opacity: 1; } }
+@keyframes m-s2 { 0%, 14% { opacity: 0; } 16%, 58% { opacity: 1; } 60%, 100% { opacity: 0; } }
+@keyframes m-s3 { 0%, 59% { opacity: 0; } 61%, 96% { opacity: 1; } 98%, 100% { opacity: 0; } }
+@keyframes f-s3 { 0%, 59% { opacity: .45; border-color: var(--line); } 62%, 96% { opacity: 1; border-color: var(--acc); } 99%, 100% { opacity: .45; border-color: var(--line); } }
+
+.film-pause { font: 600 15px/1 var(--sans); padding: 9px 16px; border-radius: 999px; cursor: pointer; background: var(--surf); color: var(--ink); border: 1.5px solid var(--line); }
+.film.paused *, .film.paused { animation-play-state: paused !important; }
+/* Reduced motion: no loop, one still frame of the comment, every step at full strength. */
+@media (prefers-reduced-motion: reduce) {
+  .film *, .film { animation: none !important; }
+  .pin { opacity: 1; } .sheet { transform: none; }
+  .film-steps li { opacity: 1; }
+  .film-pause { display: none; }
+}
 
 .install ol { max-width: 760px; padding-left: 1.2em; }
 .install li { margin-bottom: 14px; }
@@ -86,10 +124,16 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
 
 @media (max-width: 860px) {
   .hero .wrap, .duo { grid-template-columns: 1fr; }
-  .fix { grid-template-columns: 1fr; gap: 48px; }
+  /* Phones: the whole film fits one screen, so only the current step's caption shows, in place. */
+  .film { grid-template-columns: 1fr; gap: 18px; margin-top: 24px; }
+  .screen { max-width: 220px; }
+  .film-steps { display: grid; gap: 0; }
+  .film-steps li { grid-area: 1 / 1; border-left: 0; padding: 0; text-align: center; }
+  .film-steps .s1 { animation-name: m-s1; } .film-steps .s2 { animation-name: m-s2; } .film-steps .s3 { animation-name: m-s3; }
+  .film-steps h3 { font-size: 20px; }
   .hero .wrap { padding-top: 48px; padding-bottom: 64px; }
   .hero .ph { width: 240px; margin-top: 12px; }
-  .note { left: -70px; top: 300px; width: 170px; font-size: 16px; }
+  .note { left: -84px; top: 4px; width: 170px; font-size: 16px; }
   .steps { grid-template-columns: 1fr; gap: 56px; }
   section.band { padding: 64px 0; }
 }
@@ -97,5 +141,10 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
   body { font-size: 17px; }
   .wrap { padding: 0 16px; }
   .cmd { font-size: 13px; }
-  .note { left: -52px; width: 160px; }
+  .note { left: -52px; top: -6px; width: 160px; }
+  .note::after { right: 40px; }
+}
+@media (max-width: 860px) and (prefers-reduced-motion: reduce) {
+  .film-steps { gap: 12px; }
+  .film-steps li { grid-area: auto; }
 }
