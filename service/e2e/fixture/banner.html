@@ -1,0 +1,19 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fixture with a cookie banner</title>
+  <script src="http://localhost:8788/t.js" data-site="fixture" defer></script>
+</head>
+<body>
+  <h1>Page with a cookie banner</h1>
+  <p>A bottom banner like a consent bar: fixed to the bottom edge, buttons stacked on a phone.</p>
+  <div style="height: 2000px"></div>
+  <!-- Sits in the bottom 100px or so on a phone, over the page. -->
+  <div id="banner" style="position: fixed; left: 0; right: 0; bottom: 0; z-index: 50; background: #fff; border-top: 1px solid #ccc; padding: 10px 16px; display: flex; flex-direction: column; gap: 6px">
+    <button type="button" id="accept">Accept</button>
+    <button type="button" id="decline">Decline</button>
+  </div>
+</body>
+</html>

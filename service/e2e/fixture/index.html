@@ -16,6 +16,14 @@
   <img id="photo" src="http://localhost:4174/photo.jpg" width="240" height="160" alt="A photo from another site">
   <p><a id="other-link" href="/other.html">Read the other page</a></p>
   <form action="/other.html"><button id="go" type="submit">Send the form</button></form>
+  <button id="counter" onclick="this.textContent=String(+this.textContent+1)">0</button>
+  <div role="tablist">
+    <button type="button" role="tab" id="tab-a">Tab A</button>
+    <button type="button" role="tab" id="tab-b">Tab B</button>
+  </div>
+  <div id="panel-a">Panel A</div>
+  <div id="panel-b" hidden>Panel B</div>
+  <details id="more"><summary>More</summary><p>Hidden text</p></details>
   <ul>
     <li>First thing to review</li>
     <li>Second thing to review</li>
@@ -24,6 +32,14 @@
   <!-- A lazy image far below the fold never loads; it must not hold up a screenshot. -->
   <div style="height:3000px"></div>
   <img loading="lazy" src="http://localhost:4174/photo.jpg?lazy" width="240" height="160" alt="Below the fold">
+  <script>
+    for (const tab of document.querySelectorAll("[role=tab]")) {
+      tab.addEventListener("click", () => {
+        document.getElementById("panel-a").hidden = tab.id !== "tab-a";
+        document.getElementById("panel-b").hidden = tab.id !== "tab-b";
+      });
+    }
+  </script>
   <script>
     // A typical site keyboard shortcut: ignores keys typed into fields, reacts to "/" and "j".
     document.addEventListener("keydown", (e) => {

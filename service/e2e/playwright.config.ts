@@ -15,6 +15,12 @@ export default defineConfig({
     {
       name: "phone",
       use: { browserName: "chromium", viewport: { width: 390, height: 844 }, deviceScaleFactor: 3, hasTouch: true, isMobile: true },
+      grepInvert: /@desktop/,
+    },
+    {
+      name: "desktop",
+      use: { browserName: "chromium", viewport: { width: 1280, height: 800 } },
+      grep: /@desktop/,
     },
     {
       name: "firefox-desktop",

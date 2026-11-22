@@ -1,6 +1,7 @@
 import { fetchPageComments, postComment, type PageComment } from "./api";
 import { describeElement, findPin, locatorFor, type Locator } from "./locate";
 import { takeScreenshot } from "./shot";
+import { readMode, saveMode, type Mode } from "./mode";
 import { isSettled, OverlayUI, type PinView } from "./ui";
 
 /** How long Save waits for the screenshot before sending the comment without it. */
@@ -98,6 +99,7 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
 
   function review(comments: PageComment[]): void {
     let draft: Draft | null = null;
+    let mode: Mode = readMode(win);
     let placed: (PinView & { comment: PageComment })[] = [];
 
     const render = () => {
@@ -119,6 +121,14 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       clearTimeout(savedTimer);
       savedTimer = setTimeout(updateBar, SAVED_NOTICE_MS);
       updateBar();
+    };
+
+    ui.setMode(mode);
+    ui.onModeChange = (m) => {
+      mode = m;
+      saveMode(win, m);
+      ui.setMode(m);
+      down = null;
     };
 
     ui.onPinTap = (n) => {
@@ -221,12 +231,12 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     let down: { id: number; x: number; y: number; t: number; target: Element } | null = null;
     let lastPointerUp = -Infinity;
     const onPointerDown = (e: PointerEvent) => {
-      if (inOverlay(e)) return;
+      if (mode === "use" || inOverlay(e)) return;
       hide(e); // never preventDefault here: the page must still scroll
       down = e.isPrimary && e.button <= 0 ? { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, target: targetOf(e) } : null;
     };
     const onPointerUp = (e: PointerEvent) => {
-      if (inOverlay(e)) return;
+      if (mode === "use" || inOverlay(e)) return;
       hide(e);
       lastPointerUp = e.timeStamp;
       const d = down;
@@ -239,7 +249,7 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       down = null; // the browser took the gesture over (a scroll or zoom)
     };
     const onClick = (e: MouseEvent) => {
-      if (inOverlay(e)) return;
+      if (mode === "use" || inOverlay(e)) return;
       // Reviewing: a tap on the page marks a spot; it never follows a link or submits a form.
       e.preventDefault();
       hide(e);
@@ -255,7 +265,7 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       tap(target, clientX, clientY);
     };
     const onOtherInput = (e: Event) => {
-      if (inOverlay(e)) return;
+      if (mode === "use" || inOverlay(e)) return;
       hide(e); // page handlers never see a review tap
       // A touch's compatibility mousedown arrives after the tap opened the sheet; its default
       // action would move focus off the comment box. (touchstart is never prevented: scrolling.)
@@ -264,6 +274,46 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape" && ui.sheetOpen) ui.dismissSheet();
     };
+
+    // The Comment cursor: fine pointers only, Comment mode only, never over the overlay or a sheet.
+    // Position comes from pointermove (one update per frame); the ring follows its target on scroll.
+    const fine = () => win.matchMedia("(hover: hover) and (pointer: fine)").matches;
+    let moveAt: { x: number; y: number; target: Element | null } | null = null;
+    let moveQueued = false;
+    let rehit = false;
+    // The page itself is never worth outlining; a margin hit means "nothing in particular".
+    const ringable = (t: Element | null): Element | null => (t && t !== doc.body && t !== doc.documentElement ? t : null);
+    const paintCursor = () => {
+      moveQueued = false;
+      if (!alive || !moveAt) return;
+      if (rehit) {
+        // The page scrolled under a still mouse: whatever is under the pointer now gets the ring.
+        rehit = false;
+        const hit = doc.elementFromPoint(moveAt.x, moveAt.y);
+        moveAt.target = hit && hit !== ui.host && !ui.host.contains(hit) ? hit : null;
+      }
+      if (mode !== "comment" || ui.sheetOpen) ui.hideCursor();
+      else ui.moveCursor(moveAt.x, moveAt.y, ringable(moveAt.target));
+    };
+    const queueCursor = () => {
+      if (moveQueued) return;
+      moveQueued = true;
+      requestAnimationFrame(paintCursor);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse" || mode !== "comment" || !fine() || ui.sheetOpen || inOverlay(e)) {
+        moveAt = null;
+        ui.hideCursor();
+        return;
+      }
+      moveAt = { x: e.clientX, y: e.clientY, target: targetOf(e) };
+      queueCursor();
+    };
+    const onPointerLeave = () => {
+      moveAt = null;
+      ui.hideCursor();
+    };
+    cleanup.push(() => ui.hideCursor());
 
     updateBar();
     render();
@@ -275,6 +325,49 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     for (const type of ["touchstart", "touchend"]) listen(doc, type, onOtherInput, { capture: true, passive: true });
     for (const type of ["mousedown", "mouseup"]) listen(doc, type, onOtherInput, capture);
     listen(doc, "keydown", onKey, capture);
+    listen(doc, "pointermove", onPointerMove, { capture: true, passive: true });
+    listen(doc.documentElement, "pointerleave", onPointerLeave);
+    listen(
+      win,
+      "scroll",
+      () => {
+        if (!moveAt) return;
+        rehit = true;
+        queueCursor();
+      },
+      { capture: true, passive: true },
+    );
+    // Sites with a fixed or sticky bar along the bottom edge (a cookie banner): sit above it.
+    const placeBar = () => {
+      if (!alive) return;
+      const x = win.innerWidth / 2;
+      const y = win.innerHeight - 4;
+      for (const hit of doc.elementsFromPoint(x, y)) {
+        if (hit === ui.host || ui.host.contains(hit)) continue;
+        for (let n: Element | null = hit; n; n = n.parentElement) {
+          const pos = win.getComputedStyle(n).position;
+          if (pos !== "fixed" && pos !== "sticky") continue;
+          const cs = win.getComputedStyle(n);
+          const r = n.getBoundingClientRect();
+          // Full-screen fixed backdrops start in the top half; they are not a bottom bar.
+          if (cs.visibility !== "hidden" && cs.opacity !== "0" && r.width > 0 && r.height > 0 && r.top > win.innerHeight * 0.5) {
+            ui.liftBar(win.innerHeight - r.top + 12);
+            return;
+          }
+        }
+      }
+      ui.liftBar(null);
+    };
+    let liftQueued = false;
+    const scheduleLift = () => {
+      if (liftQueued || !alive) return;
+      liftQueued = true;
+      requestAnimationFrame(() => {
+        liftQueued = false;
+        placeBar();
+      });
+    };
+    placeBar();
     // Coalesce bursts (resize, lazy images reflowing the page) into one layout per frame.
     let queued = false;
     const schedule = () => {
@@ -282,7 +375,10 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       queued = true;
       requestAnimationFrame(() => {
         queued = false;
-        if (alive) render();
+        if (alive) {
+          render();
+          placeBar();
+        }
       });
     };
     listen(win, "resize", schedule);
@@ -293,5 +389,9 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       ro.observe(doc.body);
       cleanup.push(() => ro.disconnect());
     }
+    // A banner that appears or hides later changes the page, not the window.
+    const mo = new MutationObserver(scheduleLift);
+    mo.observe(doc.body, { childList: true, attributes: true, subtree: true });
+    cleanup.push(() => mo.disconnect());
   }
 }

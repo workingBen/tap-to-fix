@@ -1,5 +1,6 @@
 // Screenshots of the comment layer on the fixture page: bar + compose sheet, then bar + read sheet with two saved pins.
-// Run: npm run build:client && npx tsx e2e/shots-overlay.ts <out-dir>
+// It also writes the four mode shots (overlay-{desktop,phone}-{comment,use}.png) into .local/shots/.
+// Run (from service/, one run at a time): npm run build:client && npx tsx e2e/shots-overlay.ts <out-dir>
 import { chromium } from "@playwright/test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
@@ -91,8 +92,34 @@ try {
     }
     await ctx.close();
   }
+  // Comment / Use the page, desktop (cursor over the hero) and phone, into .local/shots/.
+  const modeOut = join(process.cwd(), ".local", "shots");
+  mkdirSync(modeOut, { recursive: true });
+  for (const [device, viewport, mobile] of [
+    ["desktop", { width: 1280, height: 800 }, false],
+    ["phone", { width: 390, height: 844 }, true],
+  ] as const) {
+    const rv = await owner<{ id: string; token: string }>("/reviewers", { name: `Alexis modes ${device}` });
+    await owner("/assignments", { site: "fixture", reviewer_id: rv.id, path: "/index.html", title: "Fixture home" });
+    const ctx = await browser.newContext({ viewport, deviceScaleFactor: mobile ? 3 : 1, isMobile: mobile, hasTouch: mobile });
+    const page = await ctx.newPage();
+    await page.goto(`${FIXTURE}/index.html#ttf=${encodeURIComponent(rv.token)}`);
+    const overlay = page.locator("tap-to-fix-overlay");
+    await overlay.getByRole("button", { name: "Comment" }).waitFor();
+    const h1 = (await page.locator("h1").boundingBox())!;
+    if (!mobile) await page.mouse.move(h1.x + Math.min(h1.width / 2, 220), h1.y + h1.height / 2);
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: join(modeOut, `overlay-${device}-comment.png`) });
+    const useBtn = overlay.getByRole("button", { name: "Use the page" });
+    if (mobile) await useBtn.tap();
+    else await useBtn.click();
+    if (!mobile) await page.mouse.move(h1.x + Math.min(h1.width / 2, 220), h1.y + h1.height / 2);
+    await page.waitForTimeout(500);
+    await page.screenshot({ path: join(modeOut, `overlay-${device}-use.png`) });
+    await ctx.close();
+  }
   await browser.close();
-  console.log(`wrote ${out}`);
+  console.log(`wrote ${out} and ${modeOut}`);
 } finally {
   await teardown();
 }

@@ -16,28 +16,85 @@ export const OVERLAY_CSS =
 }
 svg { flex: none; }
 
-/* top bar */
+/* floating review pill, bottom center */
 .bar {
-  position: fixed; top: 0; left: 0; right: 0; z-index: 2147483647;
-  min-height: 52px; padding: 4px 8px 4px 16px;
-  display: flex; flex-wrap: wrap; align-items: center; column-gap: 10px;
-  background: var(--surf); border-bottom: 1px solid var(--line);
-  box-shadow: 0 2px 10px rgba(0, 0, 0, .06);
+  position: fixed; left: 50%; transform: translateX(-50%); bottom: var(--lift, calc(18px + env(safe-area-inset-bottom)));
+  z-index: 2147483647; width: max-content; max-width: calc(100vw - 16px); min-height: 52px; padding: 4px 6px 4px 16px;
+  display: flex; align-items: center; gap: 6px;
+  background: var(--surf); border: 1px solid var(--line); border-radius: 28px;
+  box-shadow: 0 8px 28px rgba(0, 0, 0, .28);
 }
 .bar[hidden] { display: none; }
+.root.sheet-open .bar { visibility: hidden; }
 .bar .msg { color: var(--mut); display: inline-flex; align-items: center; gap: 8px; }
+.bar .count { white-space: nowrap; padding-right: 6px; }
 .bar b { color: var(--ink); font-weight: 600; }
 .bar a {
-  margin-left: auto; min-height: 44px; padding: 0 8px;
+  min-height: 44px; padding: 0 12px; flex: none;
   display: inline-flex; align-items: center;
   color: var(--acc); font-weight: 700; text-decoration: none;
 }
 .bar a:focus-visible, .sheet button:focus-visible, .pin:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
 .bar .msg svg { color: var(--warn); }
-.root .bar .saved { color: var(--acc); font-weight: 600; display: inline-flex; align-items: center; gap: 6px; order: 1; }
+.bar .seg { display: inline-flex; flex: none; background: var(--bg); border: 1px solid var(--line); border-radius: 999px; padding: 3px; }
+.root .bar .seg button {
+  display: inline-flex; align-items: center; gap: 6px; min-height: 44px; padding: 0 14px; border: 0; border-radius: 999px;
+  background: transparent; color: var(--mut); font-weight: 600; white-space: nowrap; cursor: pointer;
+  -webkit-tap-highlight-color: transparent;
+}
+.root .bar .seg button * { color: inherit; }
+.root .bar .seg button.on { background: var(--acc); color: #fff; }
+.bar .seg button:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
+.bar .vr { width: 1px; align-self: stretch; background: var(--line); margin: 6px 2px; flex: none; }
+/* "Saved" floats just above the pill, so it never widens it. */
+.root .bar .saved {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 8px);
+  white-space: nowrap; color: var(--acc); font-weight: 600; display: inline-flex; align-items: center; gap: 6px;
+}
 .root .bar .saved:empty { display: none; }
-.bar a { order: 2; }
 .bar .saved svg { color: var(--acc); }
+@media (max-width: 599px) {
+  .bar .count { display: none; }
+  /* 375px phones: nothing to the left of the switch, and tighter padding, so Done stays inside the pill. */
+  .bar { padding-left: 6px; gap: 2px; }
+  .root .bar .seg button { padding: 0 10px; gap: 4px; }
+  .bar a { padding: 0 8px; }
+  .bar .vr { margin: 6px 0; }
+  .bar .msg { padding-left: 10px; }
+}
+
+/* Comment-mode cursor and hover ring (fine pointers only; the arrow is hidden by a page style while they show) */
+/* The box is the dot's, centered on the pointer by the margin; the parts hang off it. */
+.cur { position: fixed; left: 0; top: 0; width: 14px; height: 14px; margin: -7px 0 0 -7px; z-index: 2147483647; pointer-events: none; will-change: transform; }
+.cur[hidden], .hover-ring[hidden], .root[data-mode="use"] .cur, .root[data-mode="use"] .hover-ring, .root.sheet-open .cur, .root.sheet-open .hover-ring { display: none; }
+.cur .ripple { position: absolute; left: -3px; top: -3px; width: 20px; height: 20px; border-radius: 50%; border: 3px solid #7FD3A8; animation: ttf-ripple 1.4s ease-out infinite; }
+.cur .ripple.r2 { animation-delay: .7s; }
+.cur .cdot {
+  position: absolute; left: 0; top: 0; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; border: 3px solid var(--acc); box-shadow: 0 0 12px 3px rgba(127, 211, 168, .9);
+  animation: ttf-glow 1.6s ease-in-out infinite;
+}
+.root .cur .ctag {
+  position: absolute; left: 25px; top: 21px; background: var(--acc); color: #fff; font-weight: 700; font-size: 15px;
+  padding: 4px 10px; border-radius: 999px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
+}
+.hover-ring { position: fixed; left: 0; top: 0; z-index: 2147483645; border: 2px dashed #7FD3A8; border-radius: 6px; pointer-events: none; }
+@keyframes ttf-ripple { 0% { transform: scale(.6); opacity: 1; } 100% { transform: scale(2.6); opacity: 0; } }
+@keyframes ttf-glow { 0%, 100% { filter: drop-shadow(0 0 4px rgba(127, 211, 168, .7)); } 50% { filter: drop-shadow(0 0 10px rgba(127, 211, 168, 1)) drop-shadow(0 0 20px rgba(127, 211, 168, .6)); } }
+@media (prefers-reduced-motion: reduce) {
+  .cur .ripple, .cur .cdot { animation: none; }
+  .cur .ripple { transform: scale(1.6); opacity: .8; }
+  .cur .ripple.r2 { display: none; }
+}
+
+/* Text zoom on a 375px phone leaves under 360 CSS px: drop the icons, keep the text size. */
+@media (max-width: 359px) {
+  .bar { padding-right: 2px; }
+  .bar .seg { padding: 2px; }
+  .root .bar .seg button { padding: 0 8px; }
+  .root .bar .seg button svg { display: none; }
+  .bar a { padding: 0 6px; }
+}
 
 /* pins: a zero-size layer in document coordinates */
 .pins { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 2147483646; pointer-events: none; }

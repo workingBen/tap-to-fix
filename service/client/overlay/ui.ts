@@ -1,5 +1,6 @@
 import type { Status } from "./api";
 import { OVERLAY_CSS } from "./styles";
+import type { Mode } from "./mode";
 import { PIN_BODY_CX, PIN_BODY_CY, PIN_FLIP_MARGIN, pinPath, type Dir } from "./pin-shape";
 
 export const STATUS_LABELS: Record<Status, string> = {
@@ -24,6 +25,7 @@ export type PinView = { n: number; x: number; y: number; settled?: boolean; move
 
 export type ReadView = { n: number; body: string; status: Status; note: string | null; moved: boolean };
 
+const CURSOR_STYLE_ID = "ttf-cursor-style";
 const SVG_NS = "http://www.w3.org/2000/svg";
 
 // Monochrome line icon (stroke follows currentColor).
@@ -46,6 +48,8 @@ function icon(paths: string[]): SVGSVGElement {
   return svg;
 }
 const ALERT_ICON = ["M12 3l9.5 17h-19z", "M12 10v4", "M12 17.5v.01"];
+const PEN_ICON = ["M4 20h4L19 9l-4-4L4 16z", "M13.5 6.5l4 4"];
+const POINTER_ICON = ["M5 3l14 7-6.5 2L10 19z"];
 const CHECK_ICON = ["M5 12.5l4.5 4.5L19 7.5"];
 
 function el<K extends keyof HTMLElementTagNameMap>(
@@ -83,6 +87,10 @@ export class OverlayUI {
   /** Asked before a user-initiated close (Cancel, Escape); false keeps the sheet open. */
   private mayDismiss: (() => boolean) | null = null;
   onPinTap: (n: number) => void = () => {};
+  onModeChange: (m: Mode) => void = () => {};
+  private mode: Mode = "comment";
+  private readonly cursor: HTMLDivElement;
+  private readonly ring: HTMLDivElement;
 
   constructor(private readonly doc: Document, private readonly dashboardUrl: string) {
     this.host = doc.createElement("tap-to-fix-overlay");
@@ -96,7 +104,20 @@ export class OverlayUI {
     this.pinsLayer = el("div", { class: "pins", "data-ttf": "pins" });
     this.sheet = el("div", { class: "sheet", "data-ttf": "sheet", role: "dialog", "aria-modal": "false" });
     this.sheet.hidden = true;
-    this.root = el("div", { class: "root" }, this.pinsLayer, this.bar, this.sheet);
+    // The Comment-mode cursor and the hover ring live in the shadow root, so a screenshot (which
+    // leaves the host out) and the page's own styles never see them.
+    this.cursor = el(
+      "div",
+      { class: "cur", "data-ttf": "cursor", "aria-hidden": "true" },
+      el("span", { class: "ripple" }),
+      el("span", { class: "ripple r2" }),
+      el("span", { class: "cdot" }),
+      el("span", { class: "ctag" }, "Comment"),
+    );
+    this.ring = el("div", { class: "hover-ring", "data-ttf": "ring", "aria-hidden": "true" });
+    this.cursor.hidden = true;
+    this.ring.hidden = true;
+    this.root = el("div", { class: "root", "data-mode": "comment" }, this.pinsLayer, this.ring, this.cursor, this.bar, this.sheet);
     shadow.append(style, this.root);
     // Keystrokes in the comment box reach the page retargeted to this host, so the page's
     // "ignore keys while typing in a field" checks miss them and its shortcuts would fire.
@@ -116,8 +137,12 @@ export class OverlayUI {
         content = [el("span", { class: "msg" }, "Opening your review…")];
         break;
       case "reviewing":
-        content = [el("span", { class: "msg" }, el("b", {}, "Reviewing"), ` · ${countLabel(state.count)}`)];
-        content.push(link("Done"));
+        content = [
+          el("span", { class: "msg count", "data-ttf": "count" }, el("b", {}, "Reviewing"), ` · ${countLabel(state.count)}`),
+          this.modeGroup(),
+          el("span", { class: "vr", "aria-hidden": "true" }),
+          link("Done"),
+        ];
         break;
       case "not_assigned":
         content = [warn("This page isn't on your review list"), link("Back to your list")];
@@ -129,12 +154,79 @@ export class OverlayUI {
         content = [warn("Can't reach the review service right now.")];
         break;
     }
-    // Replace everything except the live region, which stays put (CSS order places it before Done).
+    // Replace everything except the live region, which stays put (it is positioned absolutely above the pill).
     for (const n of [...this.bar.childNodes]) if (n !== this.savedNote) n.remove();
     this.bar.prepend(...content);
     const saved = state.kind === "reviewing" && !!state.saved;
     if (saved && !this.savedNote.textContent) this.savedNote.replaceChildren(icon(CHECK_ICON), "Saved");
     if (!saved) this.savedNote.replaceChildren();
+  }
+
+  /** The Comment / Use the page switch. Built fresh on every bar render, so no listener outlives its button. */
+  private modeGroup(): HTMLElement {
+    const seg = (m: Mode, paths: string[], label: string) => {
+      const b = el("button", { type: "button", "data-mode": m }, icon(paths), el("span", {}, label));
+      b.addEventListener("click", () => {
+        if (this.mode !== m) this.onModeChange(m);
+      });
+      return b;
+    };
+    const group = el(
+      "div",
+      { class: "seg", role: "group", "aria-label": "Mode", "data-ttf": "mode" },
+      seg("comment", PEN_ICON, "Comment"),
+      seg("use", POINTER_ICON, "Use the page"),
+    );
+    this.paintMode(group);
+    return group;
+  }
+
+  private paintMode(group: ParentNode): void {
+    for (const b of group.querySelectorAll("button[data-mode]")) {
+      const on = b.getAttribute("data-mode") === this.mode;
+      b.setAttribute("aria-pressed", String(on));
+      b.classList.toggle("on", on);
+    }
+  }
+
+  /** Puts the Comment cursor at (x, y), the ring around `target`, and hides the arrow cursor. */
+  moveCursor(x: number, y: number, target: Element | null): void {
+    this.cursor.hidden = false;
+    this.cursor.style.transform = `translate(${x}px, ${y}px)`;
+    if (target && target.isConnected) {
+      const r = target.getBoundingClientRect();
+      this.ring.hidden = false;
+      this.ring.style.width = `${r.width + 6}px`;
+      this.ring.style.height = `${r.height + 6}px`;
+      this.ring.style.transform = `translate(${r.left - 3}px, ${r.top - 3}px)`;
+    } else {
+      this.ring.hidden = true;
+    }
+    if (!this.doc.getElementById(CURSOR_STYLE_ID)) {
+      const s = this.doc.createElement("style");
+      s.id = CURSOR_STYLE_ID;
+      s.textContent = "html, html * { cursor: none !important; }";
+      this.doc.head.append(s);
+    }
+  }
+
+  hideCursor(): void {
+    this.cursor.hidden = true;
+    this.ring.hidden = true;
+    this.doc.getElementById(CURSOR_STYLE_ID)?.remove();
+  }
+
+  /** Raises the pill so its bottom edge is `px` above the viewport bottom; null puts it back. */
+  liftBar(px: number | null): void {
+    if (px === null) this.root.style.removeProperty("--lift");
+    else this.root.style.setProperty("--lift", `${px}px`);
+  }
+
+  setMode(m: Mode): void {
+    this.hideCursor();
+    this.mode = m;
+    this.root.setAttribute("data-mode", m);
+    this.paintMode(this.bar);
   }
 
   setPins(pins: PinView[]): void {
@@ -265,6 +357,7 @@ export class OverlayUI {
   closeSheet(canceled = true): void {
     if (this.sheet.hidden) return;
     this.sheet.hidden = true;
+    this.root.classList.remove("sheet-open");
     this.sheet.classList.remove("open");
     this.sheet.replaceChildren();
     this.mayDismiss = null;
@@ -279,6 +372,8 @@ export class OverlayUI {
     this.sheet.setAttribute("aria-labelledby", "ttf-sheet-h");
     this.onSheetClose = onClose;
     this.sheet.hidden = false;
+    this.hideCursor();
+    this.root.classList.add("sheet-open");
     void this.sheet.offsetHeight; // start the slide-up from the closed position
     this.sheet.classList.add("open");
   }
