@@ -69,4 +69,26 @@ describe("takeScreenshot", () => {
     expect(loadMedia).toHaveBeenCalledTimes(1);
     expect(loadMedia).toHaveBeenCalledWith(loading, { timeout: 3000 });
   });
+  it("filters out a below-the-fold element but keeps a fixed one", async () => {
+    const rect = (top: number) => ({ top, bottom: top + 100, left: 0, right: 100, width: 100, height: 100, x: 0, y: top, toJSON() {} });
+    const far = document.createElement("div");
+    far.getBoundingClientRect = () => rect(2000);
+    const fixed = document.createElement("div");
+    fixed.style.position = "fixed";
+    fixed.getBoundingClientRect = () => rect(2000);
+    document.body.append(far, fixed);
+    await takeScreenshot({ x: 1, y: 1, n: 1 }, document.createElement("div"));
+    const options = vi.mocked(createContext).mock.calls[0][1] as { filter: (n: Node) => boolean };
+    expect(options.filter(far)).toBe(false);
+    expect(options.filter(fixed)).toBe(true);
+  });
+
+  it("does not wait for an incomplete image off to the right of the viewport", async () => {
+    const img = document.createElement("img");
+    Object.defineProperty(img, "complete", { value: false });
+    img.getBoundingClientRect = () => ({ top: 10, bottom: 110, left: window.innerWidth + 500, right: window.innerWidth + 600, width: 100, height: 100, x: window.innerWidth + 500, y: 10, toJSON() {} });
+    document.body.append(img);
+    await takeScreenshot({ x: 1, y: 1, n: 1 }, document.createElement("div"));
+    expect(loadMedia).not.toHaveBeenCalled();
+  });
 });

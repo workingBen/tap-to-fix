@@ -47,6 +47,9 @@ async function captureViewport(exclude: Element): Promise<HTMLCanvasElement> {
     height: window.innerHeight,
     style: { transform: `translate(${-window.scrollX}px, ${-window.scrollY}px)` },
     // Skipping below-the-fold nodes keeps the library from fetching what is never painted.
+    // Trade-off: removing nodes below the fold can shift visible layout when visible content
+    // depends on what follows it (flex space-between/end, margin-top:auto, centered min-height
+    // containers). Accepted: it keeps the capture under the Save deadline on long pages.
     filter: (n) => {
       if (n === exclude) return false;
       if (n instanceof Element) {
