@@ -247,6 +247,77 @@ test("turning off a link asks first and says Link off", async ({ page }) => {
   await expect(toby.getByRole("button", { name: "Turn off link" })).toHaveCount(0);
 });
 
+test("Copy link copies the reviewer's link, fetched on the tap, and it opens their pages", async ({ page }) => {
+  await page.context().grantPermissions(["clipboard-read", "clipboard-write"], { origin: SERVICE });
+  await reviewerWith("Cory Copy", [{ path: "/index.html", title: "Copy page" }]);
+  const linkCalls: string[] = [];
+  page.on("request", (r) => {
+    if (r.url().endsWith("/link")) linkCalls.push(r.url());
+  });
+  await page.goto(OWNER_URL());
+  const cory = column(page, "Cory Copy");
+  await expect(cory.locator("[data-row]", { hasText: "Copy page" })).toBeVisible();
+  expect(linkCalls).toHaveLength(0);
+  await cory.getByRole("button", { name: "Copy link" }).click();
+  await expect(cory.getByRole("button", { name: "Copied" })).toBeVisible();
+  expect(linkCalls).toHaveLength(1);
+  const url = await page.evaluate(() => navigator.clipboard.readText());
+  expect(url).toMatch(new RegExp(`^${SERVICE}/r/#ttf=[A-Za-z0-9_-]{43}$`));
+  const other = await page.context().newPage();
+  await other.goto(url);
+  await expect(row(other, "Copy page")).toBeVisible();
+});
+
+test("Text link opens a text message with the link in it", async ({ page }) => {
+  await page.addInitScript(() => {
+    const w = window as unknown as { smsOpened: string[] };
+    w.smsOpened = [];
+    const click = HTMLAnchorElement.prototype.click;
+    HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+      if (this.href.startsWith("sms:")) w.smsOpened.push(this.getAttribute("href")!);
+      else click.call(this);
+    };
+  });
+  await reviewerWith("Tess Text", [{ path: "/index.html", title: "Text page" }]);
+  await page.goto(OWNER_URL());
+  const tess = column(page, "Tess Text");
+  await tess.getByRole("button", { name: "Text link" }).click();
+  await expect.poll(() => page.evaluate(() => (window as unknown as { smsOpened: string[] }).smsOpened.length)).toBe(1);
+  const href = await page.evaluate(() => (window as unknown as { smsOpened: string[] }).smsOpened[0]);
+  expect(href.startsWith("sms:?&body=")).toBe(true);
+  const body = decodeURIComponent(href.slice("sms:?&body=".length));
+  expect(body).toMatch(new RegExp(`^Here's your link to review pages for Fixture: ${SERVICE}/r/#ttf=[A-Za-z0-9_-]{43}$`));
+  // The link stays on screen, with its own Text link, in case Messages did not open.
+  await expect(tess.locator("[data-flash] a[data-sms]")).toHaveAttribute("href", href);
+});
+
+test("a link made before links were kept shows the plain note", async ({ page }) => {
+  await reviewerWith("Olive Old", []);
+  await page.route("**/api/owner/reviewers/*/link", (route) =>
+    route.fulfill({ status: 409, contentType: "application/json", body: '{"error":"x","code":"not_stored"}' }),
+  );
+  await page.goto(OWNER_URL());
+  const olive = column(page, "Olive Old");
+  await olive.getByRole("button", { name: "Copy link" }).click();
+  await expect(olive.locator("[data-flash]")).toContainText(
+    "This link was made before links could be copied. Tap New link once to make one you can copy and text.",
+  );
+});
+
+for (const [label, who] of [["", "Rowan Buttons"], [" @desktop", "Rowan Desktop"]]) {
+  test(`the column's link buttons sit on one row under the name, with no horizontal scroll${label}`, async ({ page }) => {
+    await reviewerWith(who, []);
+    await page.goto(OWNER_URL());
+    const rowan = column(page, who);
+    const ys = [];
+    for (const name of ["Copy link", "Text link", "New link"]) ys.push((await rowan.getByRole("button", { name }).boundingBox())!.y);
+    expect(new Set(ys).size).toBe(1);
+    const nameBox = (await rowan.locator(".pname").boundingBox())!;
+    expect(ys[0]).toBeGreaterThan(nameBox.y);
+    expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  });
+}
+
 test("remove asks with the comment count", async ({ page }) => {
   const r = await reviewerWith("Sam Remove", [{ path: "/other.html", title: "Remove me" }]);
   await comment(r.token, "/other.html", "One");

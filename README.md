@@ -22,7 +22,7 @@ From `service/`, after a one-time `node_modules/.bin/wrangler login`:
 npm run deploy
 ```
 
-It creates (or reuses) only the D1 database `tap-to-fix` and the R2 bucket `tap-to-fix-shots`, applies migrations, builds the client, sets the owner token as a Worker secret, deploys, and runs a read-only live check. It prints the script tag and, once, the owner link; the token is also saved in `~/.config/tap-to-fix/config.json` (mode 0600). Run it again to redeploy: it reuses the resources and the saved token (`--rotate-token` makes a new one).
+It creates (or reuses) only the D1 database `tap-to-fix` and the R2 bucket `tap-to-fix-shots`, applies migrations, builds the client, sets the owner token as a Worker secret, deploys, and runs a read-only live check. It prints the script tag and, only when it made a new owner token, the owner link; the token is also saved in `~/.config/tap-to-fix/config.json` (mode 0600). Run it again to redeploy: it reuses the resources and the saved token, and prints `Owner link: unchanged` instead of the link (`--rotate-token` makes a new one and prints it). It also makes a `LINK_KEY` Worker secret once (kept in the same config file, never printed, untouched by `--rotate-token`), which seals each reviewer's token at rest so the dashboard can hand the link out again.
 
 Two first-deploy snags:
 
@@ -78,7 +78,7 @@ Without a token, nothing appears. On a page not assigned to the reviewer, the ba
 
 ## Dashboards
 
-**Owner (`/o/`).** Open `https://YOUR-SERVICE-ORIGIN/o/#owner=OWNER_TOKEN` once. The page saves the token in `localStorage`, removes it from the address bar and shows the list of reviewers, pages and sites; on a later visit `/o/` alone works from the same browser. If the token is missing or wrong, the page asks you to paste it. From there you add sites, reviewers and assigned pages, copy each "ready for a review cycle" command (`/tap-to-fix:fix <first name> <site slug>`), and use **New link** or **Turn off link** on a reviewer. A reviewer's link is shown once, right after you add or reissue it.
+**Owner (`/o/`).** Open `https://YOUR-SERVICE-ORIGIN/o/#owner=OWNER_TOKEN` once. The page saves the token in `localStorage`, removes it from the address bar and shows the list of reviewers, pages and sites; on a later visit `/o/` alone works from the same browser. If the token is missing or wrong, the page asks you to paste it. From there you add sites, reviewers and assigned pages, copy each "ready for a review cycle" command (`/tap-to-fix:fix <first name> <site slug>`), and use **Copy link**, **Text link** (opens a new text message with the link in it), **New link** or **Turn off link** on a reviewer. The link is fetched only when you tap, and only the owner can fetch it. Reviewers added before links were kept show a note asking for **New link** once.
 
 **Reviewer (`/r/`).** Text each reviewer the link the owner page shows after you add them: `https://YOUR-SERVICE-ORIGIN/r/#ttf=THEIR_TOKEN`. It opens their list of pages with status chips; tapping a page opens the live site with the comment layer on. The token stays in the address bar so the page can be added to a phone's home screen. **New link** makes the old one stop working.
 

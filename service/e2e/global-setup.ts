@@ -9,6 +9,8 @@ import { fileURLToPath } from "node:url";
 export const SERVICE = "http://localhost:8788";
 export const FIXTURE = "http://localhost:4173";
 export const OWNER_TOKEN = "e2e-owner";
+/** A fixed 32-byte key, base64url: the e2e service keeps reviewer links like a deployed one. */
+export const LINK_KEY = "e2e-link-key-0123456789abcdefghijklmnopqrsA";
 
 const serviceDir = join(dirname(fileURLToPath(import.meta.url)), "..");
 
@@ -78,6 +80,7 @@ export default async function globalSetup(): Promise<() => Promise<void>> {
     const service = launch(join(serviceDir, "node_modules", ".bin", "tsx"), ["src/node/server.ts"], {
       PORT: "8788",
       OWNER_TOKEN,
+      LINK_KEY,
       TTF_DB_PATH: join(tmp, "e2e.sqlite"),
     });
     children.push(service);

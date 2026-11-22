@@ -3,6 +3,7 @@ import type { Context } from "hono";
 import { requireOwner, type AppBindings } from "../auth";
 import { hashToken, newId, newToken } from "../ids";
 import { batchFileLimits } from "../limits";
+import { hasLinkKey, openToken, sealToken } from "../linkcrypt";
 import { slug } from "../../client/dash/names";
 import { assignmentStatus, isSettled, type Status } from "../rollup";
 
@@ -75,9 +76,9 @@ owner.post("/reviewers", async (c) => {
   const id = newId();
   const token = newToken();
   await c.env.DB.prepare(
-    "INSERT INTO reviewers (id, name, token_hash, created_at) VALUES (?, ?, ?, ?)",
+    "INSERT INTO reviewers (id, name, token_hash, token_enc, created_at) VALUES (?, ?, ?, ?, ?)",
   )
-    .bind(id, name, await hashToken(token), new Date().toISOString())
+    .bind(id, name, await hashToken(token), await sealToken(c.env.LINK_KEY, id, token), new Date().toISOString())
     .run();
   return c.json({ id, name, token }, 201);
 });
@@ -90,15 +91,32 @@ owner.post("/reviewers/:id/reissue", async (c) => {
     .first<{ id: string; name: string }>();
   if (!row) return c.json({ error: "Not found" }, 404);
   const token = newToken();
-  await c.env.DB.prepare("UPDATE reviewers SET token_hash = ?, revoked_at = NULL WHERE id = ?")
-    .bind(await hashToken(token), row.id)
+  await c.env.DB.prepare("UPDATE reviewers SET token_hash = ?, token_enc = ?, revoked_at = NULL WHERE id = ?")
+    .bind(await hashToken(token), await sealToken(c.env.LINK_KEY, row.id, token), row.id)
     .run();
   return c.json({ id: row.id, name: row.name, token });
 });
 
+// The reviewer's link again, for the dashboard's Copy link and Text link. Owner only, never cached.
+// 409 not_stored: made before links were kept (or LINK_KEY changed since); New link fixes it.
+owner.get("/reviewers/:id/link", async (c) => {
+  c.header("Cache-Control", "private, no-store");
+  const row = await c.env.DB.prepare("SELECT id, token_enc, revoked_at FROM reviewers WHERE id = ?")
+    .bind(c.req.param("id"))
+    .first<{ id: string; token_enc: string | null; revoked_at: string | null }>();
+  if (!row) return c.json({ error: "Not found" }, 404);
+  if (row.revoked_at !== null) return c.json({ error: "This link is turned off. Tap New link to make a new one.", code: "revoked" }, 409);
+  if (!(await hasLinkKey(c.env.LINK_KEY))) {
+    return c.json({ error: "Copying links isn't set up on this service yet. Run the deploy again.", code: "no_key" }, 503);
+  }
+  const token = row.token_enc ? await openToken(c.env.LINK_KEY, row.id, row.token_enc) : null;
+  if (!token) return c.json({ error: "This link was made before links could be copied.", code: "not_stored" }, 409);
+  return c.json({ url: `${new URL(c.req.url).origin}/r/#ttf=${token}` });
+});
+
 owner.post("/reviewers/:id/revoke", async (c) => {
   const res = await c.env.DB.prepare(
-    "UPDATE reviewers SET revoked_at = COALESCE(revoked_at, ?) WHERE id = ?",
+    "UPDATE reviewers SET revoked_at = COALESCE(revoked_at, ?), token_enc = NULL WHERE id = ?",
   )
     .bind(new Date().toISOString(), c.req.param("id"))
     .run();

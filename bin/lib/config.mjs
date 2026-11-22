@@ -21,6 +21,7 @@ export function loadConfig({ env = process.env, home } = {}) {
   return null;
 }
 
+/** link_key (the Worker's LINK_KEY secret, kept so redeploys reuse it) is written only when given. */
 export function saveConfig(cfg, { home }) {
   const file = configPath(home);
   const dir = join(home, ".config", "tap-to-fix");
@@ -29,7 +30,8 @@ export function saveConfig(cfg, { home }) {
   try {
     chmodSync(file, 0o600);
     ftruncateSync(fd, 0);
-    writeSync(fd, JSON.stringify({ service: cfg.service, owner_token: cfg.owner_token }, null, 2) + "\n");
+    const data = { service: cfg.service, owner_token: cfg.owner_token, ...(cfg.link_key ? { link_key: cfg.link_key } : {}) };
+    writeSync(fd, JSON.stringify(data, null, 2) + "\n");
   } finally {
     closeSync(fd);
   }
