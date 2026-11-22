@@ -20,7 +20,14 @@ export type OwnerAssignment = {
   pr_urls: string[];
 };
 export type Overview = { reviewers: OwnerReviewer[]; assignments: OwnerAssignment[] };
-export type Flash = { kind: "link"; id: string; name: string; url: string };
+/**
+ * A note in one reviewer's column: "link" right after a new link is made, "again" when a stored
+ * link was fetched but could not be copied or was texted, "missing" when the link was made before
+ * links were kept.
+ */
+export type Flash =
+  | { kind: "link" | "again"; id: string; name: string; url: string }
+  | { kind: "missing"; id: string; name: string };
 /** What the Assign pages panel holds while it is open; kept across re-renders. */
 export type AssignDraft = {
   /** The reviewer whose column button opened the panel; focus goes back there on close. */
@@ -69,6 +76,32 @@ export function fixCommand(
 
 export function reviewerLink(origin: string, token: string): string {
   return `${origin}/r/#ttf=${token}`;
+}
+
+export const NOT_STORED_NOTE =
+  "This link was made before links could be copied. Tap New link once to make one you can copy and text.";
+
+/** The text message that carries a reviewer's link; names the sites their pages are on. */
+export function smsBody(siteNames: string[], url: string): string {
+  const names = [...new Set(siteNames.filter(Boolean))];
+  return names.length ? `Here's your link to review pages for ${listNames(names)}: ${url}` : `Here's your link to review pages: ${url}`;
+}
+
+/** sms:?&body= opens a new message with the body filled in, on iPhone and Android alike. */
+export function smsHref(body: string): string {
+  return "sms:?&body=" + encodeURIComponent(body).replace(/'/g, "%27");
+}
+
+/** The names of the sites a reviewer has pages on, in the overview's order. */
+export function reviewerSiteNames(s: Pick<OwnerState, "sites" | "overview">, reviewerId: string): string[] {
+  const names = new Map(s.sites.map((x) => [x.slug, x.name]));
+  const out: string[] = [];
+  for (const a of s.overview.assignments) {
+    if (a.reviewer.id !== reviewerId) continue;
+    const n = names.get(a.site) ?? a.site;
+    if (!out.includes(n)) out.push(n);
+  }
+  return out;
 }
 
 /** Only http(s) URLs become links; anything else (javascript:, data:) is shown as text. */
@@ -207,13 +240,14 @@ const COPY = svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 1
 const DOWNLOAD = svg('<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>', 18);
 const OUT = svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>', 17);
 const LINK = svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>', 18);
+const MESSAGE = svg('<path d="M4 5h16v11H10l-5 4v-4H4z"/>', 18);
 const MORE = svg('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>');
 const PR = svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4M13 3.5L10.5 6 13 8.5"/>', 17);
 const SEARCH = svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>');
 const CHECK = svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 16).replace('stroke-width="2"', 'stroke-width="3"');
 
-const copyButton = (text: string) =>
-  `<button type="button" class="btn quiet copy" data-copy="${esc(text)}">${COPY}<span>Copy</span></button>`;
+const copyButton = (text: string, label = "Copy") =>
+  `<button type="button" class="btn quiet copy" data-copy="${esc(text)}" data-label="${esc(label)}">${COPY}<span>${esc(label)}</span></button>`;
 const errLine = () => `<p class="err" data-error role="alert" hidden></p>`;
 const field = (label: string, name: string, attrs = "") =>
   `<label class="fld"><span>${esc(label)}</span><input name="${name}" autocomplete="off" required ${attrs}></label>`;
@@ -256,14 +290,24 @@ function commandHtml(command: string): string {
   );
 }
 
-function flashHtml(f: Flash): string {
+function flashHtml(f: Flash, s: Pick<OwnerState, "sites" | "overview">): string {
   const n = esc(firstName(f.name));
+  const done = `<button type="button" class="btn quiet" data-action="dismiss">Done</button>`;
+  if (f.kind === "missing") {
+    return `<div class="flash" data-flash role="status"><p class="flash-note">${esc(NOT_STORED_NOTE)}</p><div class="flash-row">${done}</div></div>`;
+  }
+  const sms = smsHref(smsBody(reviewerSiteNames(s, f.id), f.url));
+  const sub =
+    f.kind === "link"
+      ? "Copy it or text it now. Copy link and Text link above bring it back later."
+      : "Copy it, or text it from here if Messages didn't open.";
   return (
     `<div class="flash" data-flash role="status">` +
-    `<p class="flash-h">Text this link to ${n}</p>` +
-    `<p class="flash-s">The link is shown only now. Copy it before you leave this page.</p>` +
+    `<p class="flash-h">${f.kind === "link" ? `Text this link to ${n}` : `${n}'s link`}</p>` +
+    `<p class="flash-s">${sub}</p>` +
     `<code class="flash-url" data-flash-url>${esc(f.url)}</code>` +
-    `<div class="flash-row">${copyButton(f.url)}<button type="button" class="btn quiet" data-action="dismiss">Done</button></div>` +
+    `<div class="flash-row">${copyButton(f.url, "Copy link")}` +
+    `<a class="btn quiet" data-sms href="${esc(sms)}">${MESSAGE}<span>Text link</span></a>${done}</div>` +
     `</div>`
   );
 }
@@ -449,10 +493,15 @@ function personHtml(s: OwnerState, r: OwnerReviewer, batches: ReadyBatch[]): str
     `<section class="person" data-person="${esc(r.id)}" aria-labelledby="p-${esc(r.id)}">` +
     `<div class="person-h"><span class="av" aria-hidden="true">${initial(r.name)}</span>` +
     `<div class="grow"><h2 class="pname" id="p-${esc(r.id)}">${esc(r.name)}</h2><p class="tu">${sub}</p></div>` +
-    `<div class="ctl"><button type="button" class="btn quiet" data-action="reissue" data-id="${esc(r.id)}">${LINK}<span>New link</span></button>` +
     menuHtml(r, batches) +
+    `<div class="ctl">` +
+    (r.revoked
+      ? ""
+      : `<button type="button" class="btn quiet" data-action="copy-link" data-id="${esc(r.id)}">${COPY}<span>Copy link</span></button>` +
+        `<button type="button" class="btn quiet" data-action="text-link" data-id="${esc(r.id)}">${MESSAGE}<span>Text link</span></button>`) +
+    `<button type="button" class="btn quiet" data-action="reissue" data-id="${esc(r.id)}">${LINK}<span>New link</span></button>` +
     `</div></div><div class="person-err"></div>` +
-    (s.flash && s.flash.id === r.id ? flashHtml(s.flash) : "") +
+    (s.flash && s.flash.id === r.id ? flashHtml(s.flash, s) : "") +
     ready +
     pages +
     add +
@@ -494,7 +543,7 @@ export function renderOwner(state: OwnerState, now: Date = new Date()): string {
     `<div class="top"><p class="brand">tap-to-fix</p>` +
     adder("reviewer", reviewers.length ? "Add a reviewer" : "Add your first reviewer", form, reviewers.length === 0) +
     `</div>` +
-    (state.flash && !reviewers.some((r) => r.id === state.flash!.id) ? flashHtml(state.flash) : "") +
+    (state.flash && !reviewers.some((r) => r.id === state.flash!.id) ? flashHtml(state.flash, state) : "") +
     (state.sites.length === 0 ? `<p class="empty">Add a site first. The form is under Sites, below.</p>` : "") +
     (reviewers.length
       ? `<div class="people">${reviewers.map((r) => personHtml(state, r, batches.filter((b) => b.reviewerId === r.id))).join("")}</div>`
@@ -570,8 +619,10 @@ button { font: inherit; color: inherit; }
 /* one column per reviewer */
 .people { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 40px; margin-top: 22px; align-items: start; }
 .person { min-width: 0; }
-.person-h { position: relative; display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 2px solid var(--ink); }
-.ctl { display: flex; align-items: center; flex: none; }
+/* Row 1: avatar, name and the more menu. Row 2, under the name: Copy link, Text link, New link. */
+.person-h { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; padding-bottom: 8px; border-bottom: 2px solid var(--ink); }
+.person-h .grow { flex: 1 1 0%; }
+.ctl { display: flex; flex-wrap: wrap; align-items: center; flex: 0 0 100%; box-sizing: border-box; padding-left: 42px; }
 .av { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: var(--bg); font-weight: 700; flex: none; }
 .pname { font: 600 22px/1.2 var(--hf); overflow-wrap: anywhere; }
 .person-err:empty { display: none; }
@@ -602,7 +653,9 @@ button { font: inherit; color: inherit; }
 .flash-h { font: 600 20px/1.3 var(--hf); }
 .flash-s { margin: 4px 0 10px; font-size: 16px; color: var(--mut); }
 .flash-url { display: block; font-size: 16px; font-weight: 600; background: var(--surf); border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; overflow-wrap: anywhere; user-select: all; }
-.flash-row { display: flex; gap: 4px; margin-top: 8px; margin-left: -10px; }
+.flash-row { display: flex; flex-wrap: wrap; gap: 4px; margin-top: 8px; margin-left: -10px; }
+.flash-row a.btn { text-decoration: none; }
+.flash-note { font: 400 19px/1.45 var(--hf); }
 
 /* ready strip: a rule at the left, no box */
 .ready { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 14px 0 4px; padding: 12px 0 12px 14px; border-left: 4px solid var(--acc); }
@@ -699,9 +752,7 @@ html.ttf-lock { overflow: hidden; }
 
 /* phones: the controls move under the name rather than squeezing it; the menu spans the header */
 @media (max-width: 480px) {
-  .person-h { flex-wrap: wrap; row-gap: 2px; }
-  .person-h .grow { flex: 1 1 calc(100% - 52px); }
-  .ctl { flex-basis: 100%; box-sizing: border-box; padding-left: 42px; }
+  .ctl { padding-left: 0; margin-left: -10px; flex-basis: calc(100% + 10px); }
   .more { position: static; }
   .menu { left: 0; right: 0; width: auto; max-width: none; top: 100%; }
 }
@@ -1010,9 +1061,96 @@ export async function mountOwner(win: Window): Promise<void> {
     line.hidden = false;
   };
 
-  const linkFlash = (r: { id: string; name: string; token: string }) => {
-    state.flash = { kind: "link", id: r.id, name: r.name, url: reviewerLink(win.location.origin, r.token) };
+  // Links fetched this visit, by reviewer id. Never fetched on load; dropped on New link and Turn off link.
+  const links = new Map<string, Promise<ApiResult<{ url: string }>>>();
+  const fetchLink = (id: string) => {
+    let p = links.get(id);
+    if (!p) {
+      p = api<{ url: string }>(tok, `/api/owner/reviewers/${encodeURIComponent(id)}/link`);
+      links.set(id, p);
+      void p.then((r) => {
+        if (!r.ok && links.get(id) === p) links.delete(id);
+      });
+    }
+    return p;
   };
+
+  const linkFlash = (r: { id: string; name: string; token: string }) => {
+    const url = reviewerLink(win.location.origin, r.token);
+    links.set(r.id, Promise.resolve({ ok: true, data: { url } }));
+    state.flash = { kind: "link", id: r.id, name: r.name, url };
+  };
+
+  /** 409 not_stored: the plain note in the column; anything else: the service's message. */
+  function linkFailed(el: HTMLElement, reviewer: OwnerReviewer, res: { status: number; error?: string; code?: string }): void {
+    if (res.code === "not_stored") {
+      state.flash = { kind: "missing", id: reviewer.id, name: reviewer.name };
+      render();
+      return;
+    }
+    failNear(el, res);
+  }
+
+  /**
+   * Copy link. Where the browser takes a pending clipboard item (Safari), the write starts inside
+   * the tap and resolves with the fetched link; otherwise the link is fetched, then written.
+   */
+  async function copyLink(el: HTMLElement, reviewer: OwnerReviewer): Promise<void> {
+    const pending = fetchLink(reviewer.id);
+    let copied = false;
+    const Item = (win as Window & { ClipboardItem?: typeof ClipboardItem }).ClipboardItem;
+    const clip = win.navigator.clipboard as Clipboard | undefined;
+    let early: Promise<void> | null = null;
+    if (typeof Item === "function" && typeof clip?.write === "function") {
+      const blob = pending.then((r) => (r.ok ? new Blob([r.data.url], { type: "text/plain" }) : Promise.reject(new Error("no link"))));
+      try {
+        early = clip.write([new Item({ "text/plain": blob })]);
+        early.catch(() => {}); // awaited below; this only keeps a refusal from going unhandled
+      } catch {
+        early = null;
+      }
+    }
+    const res = await pending;
+    if (!res.ok) return linkFailed(el, reviewer, res);
+    if (early) {
+      try {
+        await early;
+        copied = true;
+      } catch {
+        /* fall through to writeText */
+      }
+    }
+    if (!copied) {
+      try {
+        await win.navigator.clipboard.writeText(res.data.url);
+        copied = true;
+      } catch {
+        /* show it to copy by hand */
+      }
+    }
+    if (!copied) {
+      state.flash = { kind: "again", id: reviewer.id, name: reviewer.name, url: res.data.url };
+      render();
+      const shown = main.querySelector(`[data-person="${CSS.escape(reviewer.id)}"] [data-flash-url]`) as HTMLElement | null;
+      if (shown) await copyText(win, res.data.url, shown);
+      return;
+    }
+    const btn = main.querySelector(`[data-person="${CSS.escape(reviewer.id)}"] [data-action=copy-link]`) as HTMLElement | null;
+    const label = btn?.querySelector("span");
+    if (!label) return;
+    label.textContent = "Copied";
+    setTimeout(() => (label.textContent = "Copy link"), 1800);
+  }
+
+  /** Text link: a new text message with the link in it; the link stays on screen in case Messages didn't open. */
+  async function textLink(el: HTMLElement, reviewer: OwnerReviewer): Promise<void> {
+    const res = await fetchLink(reviewer.id);
+    if (!res.ok) return linkFailed(el, reviewer, res);
+    state.flash = { kind: "again", id: reviewer.id, name: reviewer.name, url: res.data.url };
+    render();
+    const a = main.querySelector(`[data-person="${CSS.escape(reviewer.id)}"] [data-flash] a[data-sms]`) as HTMLAnchorElement | null;
+    a?.click();
+  }
 
   async function onSubmit(form: HTMLFormElement): Promise<void> {
     const kind = form.getAttribute("data-form");
@@ -1056,7 +1194,7 @@ export async function mountOwner(win: Window): Promise<void> {
       if (!label) return;
       if (result === "copied") {
         label.textContent = "Copied";
-        setTimeout(() => (label.textContent = "Copy"), 1800);
+        setTimeout(() => (label.textContent = el.getAttribute("data-label") ?? "Copy"), 1800);
       } else {
         label.textContent = el.closest(".flash") ? "Select and copy the link" : "Select and copy the command";
       }
@@ -1104,16 +1242,22 @@ export async function mountOwner(win: Window): Promise<void> {
     } else if (action === "dismiss") {
       state.flash = null;
       render();
+    } else if (action === "copy-link" && reviewer) {
+      await copyLink(el, reviewer);
+    } else if (action === "text-link" && reviewer) {
+      await textLink(el, reviewer);
     } else if (action === "reissue" && reviewer) {
       if (!win.confirm(reissueConfirm(reviewer.name))) return;
       const res = await api<{ id: string; name: string; token: string }>(tok, `/api/owner/reviewers/${encodeURIComponent(id)}/reissue`, {
         method: "POST",
       });
+      links.delete(id);
       if (!res.ok) return failNear(el, res);
       linkFlash(res.data);
       await refresh();
     } else if (action === "revoke" && reviewer) {
       if (!win.confirm(revokeConfirm(reviewer.name))) return;
+      links.delete(id);
       const res = await api(tok, `/api/owner/reviewers/${encodeURIComponent(id)}/revoke`, { method: "POST" });
       if (!res.ok) return failNear(el, res);
       if (state.flash && state.flash.id === reviewer.id) state.flash = null;

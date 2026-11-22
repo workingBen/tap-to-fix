@@ -12,20 +12,22 @@ import { createR2 } from "./r2-memory";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
-function ownerToken(): string {
+function devVar(name: "OWNER_TOKEN" | "LINK_KEY"): string {
   // An explicit environment variable wins (the e2e harness relies on this), then .dev.vars.
-  if (process.env.OWNER_TOKEN) return process.env.OWNER_TOKEN;
+  if (process.env[name]) return process.env[name];
   const varsFile = join(root, ".dev.vars");
   if (existsSync(varsFile)) {
     for (const line of readFileSync(varsFile, "utf8").split("\n")) {
-      const m = line.match(/^\s*OWNER_TOKEN\s*=\s*(.*?)\s*$/);
+      const m = line.match(new RegExp(`^\\s*${name}\\s*=\\s*(.*?)\\s*$`));
       if (m) return m[1].replace(/^(["'])(.*)\1$/, "$2");
     }
   }
   return "";
 }
 
-const token = ownerToken();
+const token = devVar("OWNER_TOKEN");
+// Optional: without it, reviewer links are not kept for Copy link / Text link.
+const linkKey = devVar("LINK_KEY") || undefined;
 if (!token) {
   console.error("OWNER_TOKEN is not set. Put OWNER_TOKEN=... in service/.dev.vars or the environment.");
   process.exit(1);
@@ -48,7 +50,7 @@ for (const name of readdirSync(dir).filter((f) => f.endsWith(".sql")).sort()) {
   console.log("applied migration", name);
 }
 
-const env: Env = { DB: db, SHOTS: createR2(), OWNER_TOKEN: token };
+const env: Env = { DB: db, SHOTS: createR2(), OWNER_TOKEN: token, LINK_KEY: linkKey };
 const port = Number(process.env.PORT ?? 8787);
 // Static client files (public/t.js, public/overlay.js) first, then the API app.
 const outer = new Hono();

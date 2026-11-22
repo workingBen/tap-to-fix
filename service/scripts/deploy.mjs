@@ -6,7 +6,9 @@
 // R2 bucket `tap-to-fix-shots`, and deploys the Worker `tap-to-fix`. Every wrangler
 // call goes through `wrangler()`, which refuses any argument list not in ALLOWED, so
 // no other resource name can ever reach a wrangler command. The owner token goes to
-// `wrangler secret put` on stdin only and is printed once, in the final owner link.
+// `wrangler secret put` on stdin only and is printed only in a run that made a new one.
+// LINK_KEY (which seals reviewer tokens so the owner can copy their links again) is made
+// once, set the same way, saved in the config file beside the owner token, and never printed.
 // wrangler.deploy.toml is built from a fixed template, never copied from wrangler.toml.
 import { spawn } from "node:child_process";
 import { randomBytes } from "node:crypto";
@@ -30,6 +32,7 @@ export const ALLOWED = [
   ["r2", "bucket", "create", BUCKET_NAME],
   ["d1", "migrations", "apply", DB_NAME, "--remote", "-c", DEPLOY_CONFIG],
   ["secret", "put", "OWNER_TOKEN", "-c", DEPLOY_CONFIG],
+  ["secret", "put", "LINK_KEY", "-c", DEPLOY_CONFIG],
   ["deploy", "-c", DEPLOY_CONFIG],
 ];
 
@@ -146,11 +149,14 @@ export function renderDeployToml(source, databaseId) {
 export const WRANGLER_BIN = join("node_modules", ".bin", "wrangler");
 
 /** What a fresh deploy runs, in order. --dry-run prints this and runs nothing. */
-export function plan({ hasToken, rotate }) {
+export function plan({ hasToken, rotate, hasLinkKey = false }) {
   const w = (args, note) => ({ line: `${WRANGLER_BIN} ${args.join(" ")}`, note });
   const secretNote = hasToken && !rotate
     ? "only if the database was just created (the saved token is kept)"
     : "token on stdin, never as an argument";
+  const keyNote = hasLinkKey
+    ? "only if the database was just created (the saved link key is kept)"
+    : "a new link key, on stdin, never printed";
   return [
     w(ALLOWED[0]),
     w(ALLOWED[1]),
@@ -161,7 +167,8 @@ export function plan({ hasToken, rotate }) {
     w(ALLOWED[5]),
     { line: "npm run build:client" },
     w(ALLOWED[6], secretNote),
-    w(ALLOWED[7]),
+    w(ALLOWED[7], keyNote),
+    w(ALLOWED[8]),
     { line: "save ~/.config/tap-to-fix/config.json", note: "mode 0600" },
     { line: "read-only live check", note: "GET /api/health, /t.js, /r, /api/owner/overview without and with the token" },
   ];
@@ -181,6 +188,7 @@ export async function deploy(argv, deps) {
     out = (s) => console.log(s),
     err = (s) => console.error(s),
     newToken = () => randomBytes(32).toString("base64url"),
+    newLinkKey = () => randomBytes(32).toString("base64url"),
     sleep = (ms) => new Promise((r) => setTimeout(r, ms)),
   } = deps;
   const rotate = argv.includes("--rotate-token");
@@ -191,11 +199,12 @@ export async function deploy(argv, deps) {
     return 1;
   }
 
-  const saved = readSavedToken(home);
+  const { owner_token: saved, link_key: savedKey } = readSaved(home);
   if (dryRun) {
     out(`Dry run: nothing runs. A deploy runs these, in order, in ${serviceDir}:`);
-    for (const step of plan({ hasToken: !!saved, rotate })) out(`  ${step.line}${step.note ? `    (${step.note})` : ""}`);
+    for (const step of plan({ hasToken: !!saved, rotate, hasLinkKey: !!savedKey })) out(`  ${step.line}${step.note ? `    (${step.note})` : ""}`);
     out(`Owner token: ${saved && !rotate ? "kept from the saved config" : "a new one is generated"}.`);
+    out(`Link key: ${savedKey ? "kept from the saved config" : "a new one is generated"}.`);
     return 0;
   }
 
@@ -211,7 +220,13 @@ export async function deploy(argv, deps) {
   }
 
   let token = null; // set once known; every printed line is redacted against it
-  const redact = (s) => (token ? String(s).split(token).join("[owner token]") : String(s));
+  let linkKey = null; // likewise, and never printed at all
+  const redact = (s) => {
+    let t = String(s);
+    if (token) t = t.split(token).join("[owner token]");
+    if (linkKey) t = t.split(linkKey).join("[link key]");
+    return t;
+  };
   const say = (s) => out(redact(s));
   const fail = (what, res) => {
     err(redact(`deploy: ${what} failed (exit ${res.code}).`));
@@ -318,6 +333,17 @@ export async function deploy(argv, deps) {
     say("Owner token: kept from the saved config.");
   }
 
+  // 6b. Link key: made once and kept, even across --rotate-token (rotating it would strand every stored link).
+  const keepKey = !!savedKey;
+  linkKey = keepKey ? savedKey : newLinkKey();
+  if (!keepKey || createdDb) {
+    const put = await wrangler(["secret", "put", "LINK_KEY", "-c", DEPLOY_CONFIG], { input: linkKey });
+    if (put.code !== 0) return fail("Setting the LINK_KEY secret", put);
+    say(`Link key: ${keepKey ? "kept, and set on the new deployment" : "created"}.`);
+  } else {
+    say("Link key: kept from the saved config.");
+  }
+
   // 7. Deploy.
   const dep = await wrangler(["deploy", "-c", DEPLOY_CONFIG]);
   if (dep.code !== 0) return fail("wrangler deploy", dep);
@@ -325,15 +351,29 @@ export async function deploy(argv, deps) {
   if (!service) return fail(`Finding the https://${WORKER_NAME}.<subdomain>.workers.dev URL in the deploy output`, { ...dep, code: 0 });
   say(`Deployed: ${service}`);
 
-  // 8. Save, check the live service (read-only), print the tag and the owner link (once).
-  saveConfig({ service, owner_token: token }, { home });
+  // 8. Save, check the live service (read-only), print the tag, and the owner link only if it is new.
+  saveConfig({ service, owner_token: token, link_key: linkKey }, { home });
   say(`Saved ${configPath(home)} (mode 0600).`);
+
+  const ownerLink = () => {
+    if (keep) {
+      say("Owner link: unchanged (saved in ~/.config/tap-to-fix/config.json)");
+      return;
+    }
+    say("Owner link (new this run). Save it now; the only other copy is the config file:");
+    out(`  ${service}/o/#owner=${token}`);
+  };
 
   const check = await liveCheck(service, token, fetchImpl, sleep);
   if (!check.ok) {
     for (const p of check.problems) err(redact(`deploy: live check: ${p}`));
-    if (check.tokenMismatch) err("deploy: the saved owner token doesn't match the deployed one — run with --rotate-token");
-    else err("deploy: the Worker is deployed and the config is saved, but the live check failed. Fix that, then run the deploy again (it keeps the same token and prints the owner link).");
+    if (check.tokenMismatch) {
+      err("deploy: the saved owner token doesn't match the deployed one — run with --rotate-token");
+      return 1;
+    }
+    err("deploy: the Worker is deployed and the config is saved, but the live check failed. Fix that, then run the deploy again (it keeps the same token).");
+    // A new token is printed even so: a re-run keeps it and prints only "unchanged".
+    if (!keep) ownerLink();
     return 1;
   }
   say("Live check: ok.");
@@ -342,17 +382,17 @@ export async function deploy(argv, deps) {
   say("Script tag for each site (put the site's slug in data-site):");
   say(`  <script src="${service}/t.js" data-site="your-site-slug" defer></script>`);
   say("");
-  say("Owner link. Save it now; the only other copy is the config file:");
-  out(`  ${service}/o/#owner=${token}`);
+  ownerLink();
   return 0;
 }
 
-function readSavedToken(home) {
+function readSaved(home) {
+  const str = (v) => (typeof v === "string" && v ? v : null);
   try {
     const raw = JSON.parse(readFileSync(configPath(home), "utf8"));
-    return typeof raw.owner_token === "string" && raw.owner_token ? raw.owner_token : null;
+    return { owner_token: str(raw.owner_token), link_key: str(raw.link_key) };
   } catch {
-    return null;
+    return { owner_token: null, link_key: null };
   }
 }
 

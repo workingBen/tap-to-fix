@@ -71,7 +71,7 @@ The deploy ends with a read-only check of the live service. It loads the health 
 
 ## 5. Hand over the script tag and the owner link — once
 
-On exit `0`, the last lines of the output are the script tag and the owner link. Relay both, exactly once:
+On exit `0`, the last lines of the output are the script tag and the owner link line. The owner link (`…/o/#owner=…`) is printed only in a run that made a new owner token (the first deploy, or `--rotate-token`). On a redeploy that kept the token, the last line is instead `Owner link: unchanged (saved in ~/.config/tap-to-fix/config.json)`: say the owner link has not changed and the one the user saved still works, and do not try to find it. Relay what was printed, exactly once:
 
 - **The script tag** goes on every page of each site the reviewers will comment on, with that site's slug in `data-site`:
   `<script src="https://tap-to-fix.<subdomain>.workers.dev/t.js" data-site="your-site-slug" defer></script>` (with the real URL from the output).
@@ -85,9 +85,11 @@ Tell the user how to finish, from the owner dashboard (the owner link):
 
 1. **Sites → Add a site:** slug (for example `bonus-decade`), name, origin (the site's `https://` address, no path) and repo (`owner/name`, the GitHub repo the fix skill works in).
 2. Put the script tag on that site, with the same slug in `data-site`.
-3. **Reviewers → Add a reviewer**, then copy that reviewer's private link to send them.
+3. **Reviewers → Add a reviewer**, then copy or text that reviewer's private link to them. **Copy link** and **Text link** in the reviewer's column bring it back any time.
 4. **Pages:** assign each reviewer the pages to look at.
 
 When a reviewer's comments are ready, the dashboard shows the `/tap-to-fix:fix <reviewer> <site>` command to run in that site's repo.
 
 To redeploy later (after updating the plugin), run this skill again. It reuses the same database, bucket and token, so the data and the owner link stay.
+
+The deploy also makes a `LINK_KEY` Worker secret once, keeps it in the same config file, and never prints it. It lets the owner dashboard's **Copy link** and **Text link** hand out a reviewer's link again later. Reviewers added before it existed need **New link** once.

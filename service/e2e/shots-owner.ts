@@ -91,6 +91,47 @@ try {
       await page.locator("[data-person] details.more > summary").first().click();
     }
     if (viewport.width === 1440 || viewport.width === 390) {
+      // The column header with Copy link / Text link / New link, then the two notes they can show.
+      const w = viewport.width;
+      const col = page.locator("[data-person]").first();
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await page.mouse.move(1, 1);
+      const headTo = async (file: string, below: string) => {
+        const a = (await col.locator(".person-h").boundingBox())!;
+        const b = (await col.locator(below).boundingBox())!;
+        const y = a.y - 8;
+        await page.screenshot({ path: join(out, file), clip: { x: Math.max(0, a.x - 8), y, width: Math.min(viewport.width, a.width + 16), height: b.y + b.height - y + 8 } });
+      };
+      await headTo(`head-${w}.png`, ".person-h");
+      // Messages can't open in a headless browser; record the sms: link instead of following it.
+      await page.evaluate(() => {
+        HTMLAnchorElement.prototype.click = function (this: HTMLAnchorElement) {
+          (window as unknown as { sms?: string }).sms = this.getAttribute("href") ?? "";
+        };
+      });
+      await col.getByRole("button", { name: "Text link" }).click();
+      await col.locator("[data-flash]").waitFor();
+      await page.mouse.move(1, 1);
+      await headTo(`text-link-${w}.png`, "[data-flash]");
+      console.log("SMS", w, decodeURIComponent(await page.evaluate(() => (window as unknown as { sms?: string }).sms ?? "")).replace(/#ttf=\S+/, "#ttf=<token>"));
+      await col.getByRole("button", { name: "Done" }).click();
+      await page.route("**/api/owner/reviewers/*/link", (r) =>
+        r.fulfill({ status: 409, contentType: "application/json", body: '{"error":"x","code":"not_stored"}' }),
+      );
+      // Ben's column: Alexis's link is already fetched this visit.
+      const col2 = page.locator("[data-person]").nth(1);
+      await col2.getByRole("button", { name: "Copy link" }).click();
+      await col2.locator("[data-flash]").waitFor();
+      await page.mouse.move(1, 1);
+      {
+        const a = (await col2.locator(".person-h").boundingBox())!;
+        const b = (await col2.locator("[data-flash]").boundingBox())!;
+        await page.screenshot({ path: join(out, `not-stored-${w}.png`), clip: { x: Math.max(0, a.x - 8), y: a.y - 8, width: Math.min(viewport.width, a.width + 16), height: b.y + b.height - a.y + 16 } });
+      }
+      await col2.getByRole("button", { name: "Done" }).click();
+      await page.unroute("**/api/owner/reviewers/*/link");
+    }
+    if (viewport.width === 1440 || viewport.width === 390) {
       // The Assign pages panel, open for Ben with two pages ticked (as in 2-assign-A).
       await page.evaluate(() => window.scrollTo(0, 0));
       await page.getByRole("button", { name: "Assign a page to Ben" }).click();

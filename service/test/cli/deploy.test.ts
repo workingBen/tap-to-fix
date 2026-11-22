@@ -64,7 +64,7 @@ function fakeAccount({
         return { code: 0, stdout: `${WARN}\nCreating bucket 'tap-to-fix-shots'...\n✅ Created bucket 'tap-to-fix-shots'\n` };
       }
       if (a.startsWith("d1 migrations apply")) return { code: 0, stdout: `${WARN}\n✅ 0001_init.sql\n` };
-      if (a.startsWith("secret put")) return { code: 0, stdout: `${WARN}\n✨ Success! Uploaded secret OWNER_TOKEN\n` };
+      if (a.startsWith("secret put")) return { code: 0, stdout: `${WARN}\n✨ Success! Uploaded secret ${args[2]}\n` };
       if (a.startsWith("deploy")) {
         return { code: 0, stdout: `${WARN}\nUploaded tap-to-fix (3.1 sec)\nDeployed tap-to-fix triggers (0.9 sec)\n  ${URL}\nCurrent Version ID: abc\n` };
       }
@@ -110,13 +110,17 @@ function setup() {
 
 let tokenCount = 0;
 const newToken = () => `TOKEN${++tokenCount}xyzSECRETxyz`;
+let keyCount = 0;
+const newLinkKey = () => `LINKKEY${++keyCount}abcSECRETabc`;
 const sleep = async () => {};
 
 const wranglerArgs = (calls: Call[]) => calls.filter((c) => isWrangler(c.cmd)).map((c) => c.args.join(" "));
 const configFile = (home: string) => join(home, ".config", "tap-to-fix", "config.json");
+const UNCHANGED = "Owner link: unchanged (saved in ~/.config/tap-to-fix/config.json)";
+const secretPut = (calls: Call[], name: string) => calls.find((c) => c.args[0] === "secret" && c.args[2] === name);
 
 function deps(s: ReturnType<typeof setup>, run: unknown, fetchImpl: unknown = fakeWorker().fetchImpl, env: Record<string, string> = {}) {
-  return { run, fetchImpl, home: s.home, serviceDir: s.dir, env, out: s.out, err: s.err, newToken, sleep };
+  return { run, fetchImpl, home: s.home, serviceDir: s.dir, env, out: s.out, err: s.err, newToken, newLinkKey, sleep };
 }
 
 describe("deploy", () => {
@@ -135,13 +139,16 @@ describe("deploy", () => {
       "r2 bucket create tap-to-fix-shots",
       "d1 migrations apply tap-to-fix --remote -c wrangler.deploy.toml",
       "secret put OWNER_TOKEN -c wrangler.deploy.toml",
+      "secret put LINK_KEY -c wrangler.deploy.toml",
       "deploy -c wrangler.deploy.toml",
     ]);
     for (const c of acct.calls.filter((c) => c.cmd !== "npm")) expect(c.cmd).toBe(join(s.dir, "node_modules", ".bin", "wrangler"));
 
-    const put = acct.calls.find((c) => c.args.includes("secret"))!;
+    const put = secretPut(acct.calls, "OWNER_TOKEN")!;
     const cfg = JSON.parse(readFileSync(configFile(s.home), "utf8"));
     expect(put.opts.input).toBe(cfg.owner_token);
+    expect(secretPut(acct.calls, "LINK_KEY")!.opts.input).toBe(cfg.link_key);
+    expect(cfg.link_key).toMatch(/^LINKKEY\d+abcSECRETabc$/);
     expect(cfg.service).toBe(URL);
     expect(statSync(configFile(s.home)).mode & 0o777).toBe(0o600);
 
@@ -157,6 +164,7 @@ describe("deploy", () => {
 
     expect(s.lines).toContain(`  <script src="${URL}/t.js" data-site="your-site-slug" defer></script>`);
     expect(s.lines).toContain(`  ${URL}/o/#owner=${cfg.owner_token}`);
+    expect(s.lines).not.toContain(UNCHANGED);
   });
 
   it("the live check is read-only and sends the token only in the Authorization header", async () => {
@@ -174,7 +182,7 @@ describe("deploy", () => {
 
   it("second run: reuses both, no create, no secret put, keeps the token", async () => {
     const s = setup();
-    saveConfig({ service: URL, owner_token: "KEPTtokenSECRET" }, { home: s.home });
+    saveConfig({ service: URL, owner_token: "KEPTtokenSECRET", link_key: "KEPTlinkKEY" }, { home: s.home });
     const acct = fakeAccount({ dbs: [{ name: "tap-to-fix", uuid: DB_ID }], buckets: ["r2_private", "tap-to-fix-shots"] });
     const code = await deploy([], deps(s, acct.run, fakeWorker({ liveToken: "KEPTtokenSECRET" }).fetchImpl));
     expect(code, s.lines.join("\n")).toBe(0);
@@ -182,7 +190,46 @@ describe("deploy", () => {
     expect(args.some((a) => a.includes("create"))).toBe(false);
     expect(args.some((a) => a.startsWith("secret"))).toBe(false);
     expect(readFileSync(join(s.dir, "wrangler.deploy.toml"), "utf8")).toContain(`database_id = "${DB_ID}"`);
-    expect(JSON.parse(readFileSync(configFile(s.home), "utf8")).owner_token).toBe("KEPTtokenSECRET");
+    const cfg = JSON.parse(readFileSync(configFile(s.home), "utf8"));
+    expect(cfg.owner_token).toBe("KEPTtokenSECRET");
+    expect(cfg.link_key).toBe("KEPTlinkKEY");
+  });
+
+  it("a kept owner token is never printed: the owner link line says unchanged", async () => {
+    const s = setup();
+    saveConfig({ service: URL, owner_token: "KEPTtokenSECRET", link_key: "KEPTlinkKEY" }, { home: s.home });
+    const acct = fakeAccount({ dbs: [{ name: "tap-to-fix", uuid: DB_ID }], buckets: ["tap-to-fix-shots"] });
+    expect(await deploy([], deps(s, acct.run, fakeWorker({ liveToken: "KEPTtokenSECRET" }).fetchImpl))).toBe(0);
+    const text = s.lines.join("\n");
+    expect(s.lines).toContain(UNCHANGED);
+    expect(text).not.toContain("KEPTtokenSECRET");
+    expect(text).not.toContain("/o/#owner=");
+    expect(text).not.toContain("KEPTlinkKEY");
+  });
+
+  it("a saved config from before LINK_KEY: makes one, sets only that secret, keeps the owner token", async () => {
+    const s = setup();
+    saveConfig({ service: URL, owner_token: "KEPTtokenSECRET" }, { home: s.home });
+    const acct = fakeAccount({ dbs: [{ name: "tap-to-fix", uuid: DB_ID }], buckets: ["tap-to-fix-shots"] });
+    expect(await deploy([], deps(s, acct.run, fakeWorker({ liveToken: "KEPTtokenSECRET" }).fetchImpl))).toBe(0);
+    const cfg = JSON.parse(readFileSync(configFile(s.home), "utf8"));
+    expect(wranglerArgs(acct.calls).filter((a) => a.startsWith("secret"))).toEqual(["secret put LINK_KEY -c wrangler.deploy.toml"]);
+    expect(secretPut(acct.calls, "LINK_KEY")!.opts.input).toBe(cfg.link_key);
+    expect(cfg.owner_token).toBe("KEPTtokenSECRET");
+    expect(cfg.link_key).toMatch(/SECRET/);
+    expect(statSync(configFile(s.home)).mode & 0o777).toBe(0o600);
+    expect(s.lines).toContain(UNCHANGED);
+    expect(s.lines.join("\n")).not.toContain(cfg.link_key);
+  });
+
+  it("the default link key is 32 random bytes, base64url", async () => {
+    const s = setup();
+    const acct = fakeAccount();
+    const { newLinkKey: _drop, ...rest } = deps(s, acct.run);
+    expect(await deploy([], rest)).toBe(0);
+    const key = JSON.parse(readFileSync(configFile(s.home), "utf8")).link_key as string;
+    expect(key).toMatch(/^[A-Za-z0-9_-]{43}$/);
+    expect(Buffer.from(key, "base64url")).toHaveLength(32);
   });
 
   it("a saved token that the live Worker rejects: exit 1 with the --rotate-token hint, no owner link", async () => {
@@ -198,14 +245,18 @@ describe("deploy", () => {
 
   it("--rotate-token puts a new secret", async () => {
     const s = setup();
-    saveConfig({ service: URL, owner_token: "OLDtokenSECRET" }, { home: s.home });
+    saveConfig({ service: URL, owner_token: "OLDtokenSECRET", link_key: "KEPTlinkKEY" }, { home: s.home });
     const acct = fakeAccount({ dbs: [{ name: "tap-to-fix", uuid: DB_ID }], buckets: ["tap-to-fix-shots"] });
     const code = await deploy(["--rotate-token"], deps(s, acct.run));
     expect(code).toBe(0);
-    const put = acct.calls.find((c) => c.args.includes("secret"))!;
+    const put = secretPut(acct.calls, "OWNER_TOKEN")!;
     const cfg = JSON.parse(readFileSync(configFile(s.home), "utf8"));
     expect(cfg.owner_token).not.toBe("OLDtokenSECRET");
     expect(put.opts.input).toBe(cfg.owner_token);
+    // Rotating the owner token leaves the link key (and so every reviewer's stored link) alone.
+    expect(secretPut(acct.calls, "LINK_KEY")).toBeUndefined();
+    expect(cfg.link_key).toBe("KEPTlinkKEY");
+    expect(s.lines).toContain(`  ${URL}/o/#owner=${cfg.owner_token}`);
   });
 
   it("a failed build stops before the secret is put (a rotation never goes live unsaved)", async () => {
@@ -224,7 +275,24 @@ describe("deploy", () => {
     saveConfig({ service: URL, owner_token: "KEPTtokenSECRET" }, { home: s.home });
     const acct = fakeAccount();
     await deploy([], deps(s, acct.run));
-    expect(acct.calls.find((c) => c.args.includes("secret"))?.opts.input).toBe("KEPTtokenSECRET");
+    expect(secretPut(acct.calls, "OWNER_TOKEN")?.opts.input).toBe("KEPTtokenSECRET");
+  });
+
+  it("a kept link key is still set when the database had to be created (new account)", async () => {
+    const s = setup();
+    saveConfig({ service: URL, owner_token: "KEPTtokenSECRET", link_key: "KEPTlinkKEY" }, { home: s.home });
+    const acct = fakeAccount();
+    expect(await deploy([], deps(s, acct.run))).toBe(0);
+    expect(secretPut(acct.calls, "LINK_KEY")?.opts.input).toBe("KEPTlinkKEY");
+    expect(s.lines.join("\n")).not.toContain("KEPTlinkKEY");
+  });
+
+  it("a new owner token is still printed when the live check fails, so it is never lost", async () => {
+    const s = setup();
+    const acct = fakeAccount();
+    expect(await deploy([], deps(s, acct.run, fakeWorker({ acao: "" }).fetchImpl))).toBe(1);
+    const token = JSON.parse(readFileSync(configFile(s.home), "utf8")).owner_token as string;
+    expect(s.lines.filter((l) => l.includes(token))).toEqual([`  ${URL}/o/#owner=${token}`]);
   });
 
   it("not signed in (or offline): exit 3, the login hint, and no other command", async () => {
@@ -316,21 +384,26 @@ describe("deploy", () => {
     for (const c of acct.calls) for (const a of c.args) expect(a).not.toContain(token);
     const withToken = s.lines.filter((l) => l.includes(token));
     expect(withToken).toEqual([`  ${URL}/o/#owner=${token}`]);
+    const key = JSON.parse(readFileSync(configFile(s.home), "utf8")).link_key as string;
+    for (const c of acct.calls) for (const a of c.args) expect(a).not.toContain(key);
+    expect(s.lines.filter((l) => l.includes(key))).toEqual([]);
   });
 
   it("a failing command's output is printed with the token redacted", async () => {
     const s = setup();
     const acct = fakeAccount();
-    let token = "";
+    const inputs: Record<string, string> = {};
     const run = async (cmd: string, args: string[], opts: Call["opts"] = {}) => {
-      if (opts.input) token = opts.input;
-      if (args[0] === "deploy") return { code: 1, stdout: "", stderr: `deploy broke near ${token}` };
+      if (opts.input) inputs[args[2]] = opts.input;
+      if (args[0] === "deploy") return { code: 1, stdout: "", stderr: `deploy broke near ${inputs.OWNER_TOKEN} and ${inputs.LINK_KEY}` };
       return acct.run(cmd, args, opts);
     };
     expect(await deploy([], deps(s, run))).toBe(1);
-    expect(token).not.toBe("");
-    expect(s.lines.join("\n")).toContain("deploy broke near [owner token]");
-    expect(s.lines.join("\n")).not.toContain(token);
+    expect(inputs.OWNER_TOKEN).toBeTruthy();
+    expect(inputs.LINK_KEY).toBeTruthy();
+    expect(s.lines.join("\n")).toContain("deploy broke near [owner token] and [link key]");
+    expect(s.lines.join("\n")).not.toContain(inputs.OWNER_TOKEN);
+    expect(s.lines.join("\n")).not.toContain(inputs.LINK_KEY);
   });
 
   it("--dry-run prints the plan and runs nothing", async () => {
@@ -400,7 +473,7 @@ describe("deploy guards and parsing", () => {
 
   it("every allowed command names only tap-to-fix resources", () => {
     const names = ALLOWED.flat().filter((x: string) => !x.startsWith("-") && /^[a-z0-9_-]+$/i.test(x) && /[_-]/.test(x));
-    expect(new Set(names)).toEqual(new Set(["tap-to-fix", "tap-to-fix-shots", "OWNER_TOKEN"]));
+    expect(new Set(names)).toEqual(new Set(["tap-to-fix", "tap-to-fix-shots", "OWNER_TOKEN", "LINK_KEY"]));
   });
 
   it("parses JSON around the macOS warning", () => {

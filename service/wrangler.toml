@@ -13,8 +13,9 @@ migrations_dir = "migrations"
 binding = "SHOTS"
 bucket_name = "tap-to-fix-shots"
 
-# OWNER_TOKEN: local dev reads it from the git-ignored .dev.vars;
-# tests set it in test/env.ts; prod uses `wrangler secret put`.
+# OWNER_TOKEN and LINK_KEY: local dev reads them from the git-ignored .dev.vars;
+# tests set them in test/env.ts; prod uses `wrangler secret put` (scripts/deploy.mjs).
+# LINK_KEY is optional locally: without it, reviewer links can't be copied again.
 
 # Built client (t.js, overlay.js) is served from here; run `npm run build:client` first.
 [assets]

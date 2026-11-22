@@ -31,7 +31,7 @@ describe("plugin manifest", () => {
   it("plugin.json parses with the right name and version", () => {
     const p = readJson(".claude-plugin/plugin.json");
     expect(p.name).toBe("tap-to-fix");
-    expect(p.version).toBe("0.2.0");
+    expect(p.version).toBe("0.3.0");
     expect(p.license).toBe("MIT");
     expect(p.author?.name).toBe("workingBen");
     expect(typeof p.repository).toBe("string");

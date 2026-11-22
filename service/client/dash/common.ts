@@ -1,7 +1,7 @@
 // Helpers shared by the reviewer (/r/) and owner (/o/) dashboards.
 
-/** `error` is the service's own `{ "error": "..." }` message, when it sent one. */
-export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error?: string };
+/** `error` is the service's own `{ "error": "..." }` message, when it sent one; `code` its machine-readable reason. */
+export type ApiResult<T> = { ok: true; data: T } | { ok: false; status: number; error?: string; code?: string };
 
 /** Hash first (and remember it), then storage. All storage access is guarded. */
 export function readToken(win: Window, hashKey: "ttf" | "owner", storageKey: string): string | null {
@@ -47,12 +47,20 @@ export async function api<T>(
     const res = await fetch(path, { ...rest, headers, body });
     if (!res.ok) {
       let error: unknown;
+      let code: unknown;
       try {
-        error = ((await res.json()) as { error?: unknown } | null)?.error;
+        const body = (await res.json()) as { error?: unknown; code?: unknown } | null;
+        error = body?.error;
+        code = body?.code;
       } catch {
         /* not JSON */
       }
-      return typeof error === "string" && error ? { ok: false, status: res.status, error } : { ok: false, status: res.status };
+      return {
+        ok: false,
+        status: res.status,
+        ...(typeof error === "string" && error ? { error } : {}),
+        ...(typeof code === "string" && code ? { code } : {}),
+      };
     }
     const text = await res.text();
     return { ok: true, data: (text ? JSON.parse(text) : null) as T };

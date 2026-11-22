@@ -76,4 +76,8 @@ describe("api", () => {
     });
     expect(await api("t", "/x")).toEqual({ ok: false, status: 0 });
   });
+  it("passes on the service's error message and code", async () => {
+    vi.stubGlobal("fetch", async () => new Response('{"error":"Made before","code":"not_stored"}', { status: 409 }));
+    expect(await api("t", "/x")).toEqual({ ok: false, status: 409, error: "Made before", code: "not_stored" });
+  });
 });
