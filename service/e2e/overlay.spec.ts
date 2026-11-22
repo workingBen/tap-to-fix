@@ -73,6 +73,110 @@ test("starts in Comment mode with Comment pressed", async ({ page }) => {
   for (const b of [comment(page), usePage(page)]) expect((await b.boundingBox())!.height).toBeGreaterThanOrEqual(44);
 });
 
+test("on a 375px phone the reviewing pill is one line and fits", async ({ page }) => {
+  await openReady(page);
+  await page.setViewportSize({ width: 375, height: 667 });
+  await expect(bar(page)).toBeVisible();
+  const m = await bar(page).evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { h: r.height, w: r.width, vw: innerWidth, left: r.left, right: r.right };
+  });
+  expect(m.h).toBeLessThan(64);
+  expect(m.w).toBeLessThanOrEqual(m.vw - 16);
+  expect(m.left).toBeGreaterThanOrEqual(8 - 0.5);
+  expect(m.right).toBeLessThanOrEqual(m.vw - 8 + 0.5);
+  await expect(comment(page)).toBeVisible();
+  await expect(usePage(page)).toBeVisible();
+  const done = overlay(page).getByRole("link", { name: "Done" });
+  await expect(done).toBeVisible();
+  // The pill's box can fit while its content spills out of it; Done must sit inside the pill.
+  const db = (await done.boundingBox())!;
+  const bb = (await bar(page).boundingBox())!;
+  expect(db.x + db.width).toBeLessThanOrEqual(bb.x + bb.width);
+  expect(bb.x + bb.width).toBeLessThanOrEqual(375 - 8 + 0.5);
+});
+
+const cursor = (page: Page) => overlay(page).locator("[data-ttf=cursor]");
+const ring = (page: Page) => overlay(page).locator("[data-ttf=ring]");
+
+test("fine pointer: the Comment cursor follows the mouse in Comment mode only @desktop", async ({ page }) => {
+  await openReady(page);
+  await page.mouse.move(400, 300);
+  await expect(cursor(page)).toBeVisible();
+  await expect(cursor(page)).toContainText("Comment");
+  await expect(page.locator("#ttf-cursor-style")).toHaveCount(1);
+  // The dot, not the tag, is what sits on the pointer.
+  const dot = cursor(page).locator(".cdot");
+  await expect(async () => {
+    const b = (await dot.boundingBox())!;
+    expect(Math.abs(b.x + b.width / 2 - 400)).toBeLessThanOrEqual(2);
+    expect(Math.abs(b.y + b.height / 2 - 300)).toBeLessThanOrEqual(2);
+  }).toPass();
+  await expect(ring(page)).toBeVisible();
+  const el = await page.evaluate(() => {
+    const r = document.elementFromPoint(400, 300)!.getBoundingClientRect();
+    return { x: r.left, y: r.top, w: r.width, h: r.height };
+  });
+  const rb = (await ring(page).boundingBox())!;
+  expect(Math.abs(rb.x - (el.x - 3))).toBeLessThanOrEqual(2);
+  expect(Math.abs(rb.y - (el.y - 3))).toBeLessThanOrEqual(2);
+  expect(Math.abs(rb.width - (el.w + 6))).toBeLessThanOrEqual(2);
+  expect(Math.abs(rb.height - (el.h + 6))).toBeLessThanOrEqual(2);
+  // Moving the mouse moves the cursor.
+  await page.mouse.move(700, 200);
+  await expect(async () => {
+    const b = (await dot.boundingBox())!;
+    expect(Math.abs(b.x + b.width / 2 - 700)).toBeLessThanOrEqual(2);
+  }).toPass();
+  // Over the pill: no custom cursor.
+  const pill = (await bar(page).boundingBox())!;
+  await page.mouse.move(pill.x + 20, pill.y + pill.height / 2);
+  await expect(cursor(page)).toBeHidden();
+  await expect(ring(page)).toBeHidden();
+  await page.mouse.move(400, 300);
+  await expect(cursor(page)).toBeVisible();
+  await usePage(page).click();
+  await page.mouse.move(420, 320);
+  await expect(cursor(page)).toBeHidden();
+  await expect(ring(page)).toBeHidden();
+  await expect(page.locator("#ttf-cursor-style")).toHaveCount(0);
+  await comment(page).click();
+  await page.mouse.move(440, 340);
+  await expect(cursor(page)).toBeVisible();
+  await expect(page.locator("#ttf-cursor-style")).toHaveCount(1);
+  // A sheet open: no custom cursor.
+  await page.mouse.click(440, 340);
+  await expect(sheet(page)).toBeVisible();
+  await expect(cursor(page)).toBeHidden();
+  await expect(page.locator("#ttf-cursor-style")).toHaveCount(0);
+});
+
+test("reduced motion: steady glow, no animation @desktop", async ({ page }) => {
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await openReady(page);
+  await page.mouse.move(400, 300);
+  await expect(cursor(page)).toBeVisible();
+  const names = await cursor(page).evaluate((el) =>
+    [...el.querySelectorAll(".ripple")].map((r) => getComputedStyle(r).animationName),
+  );
+  expect(names).toEqual(["none", "none"]);
+  expect(await cursor(page).locator(".ripple.r2").evaluate((r) => getComputedStyle(r).display)).toBe("none");
+});
+
+test("touch: no custom cursor, Comment button is the cue", async ({ page }) => {
+  await openReady(page);
+  await expect(comment(page)).toHaveAttribute("aria-pressed", "true");
+  await page.locator("h1").tap();
+  await expect(sheet(page)).toBeVisible();
+  await expect(cursor(page)).toBeHidden();
+  await expect(page.locator("#ttf-cursor-style")).toHaveCount(0);
+  await page.keyboard.press("Escape"); // back to the pill, still in Comment mode
+  await expect(sheet(page)).toBeHidden();
+  await expect(cursor(page)).toBeHidden();
+  await expect(page.locator("#ttf-cursor-style")).toHaveCount(0);
+  await expect(comment(page)).toHaveAttribute("aria-pressed", "true");
+});
+
 test("Use the page lets the page's own controls work", async ({ page }) => {
   await openReady(page);
   await usePage(page).tap();

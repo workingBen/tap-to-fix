@@ -53,7 +53,39 @@ svg { flex: none; }
 }
 .root .bar .saved:empty { display: none; }
 .bar .saved svg { color: var(--acc); }
-@media (max-width: 599px) { .bar .count { display: none; } }
+@media (max-width: 599px) {
+  .bar .count { display: none; }
+  /* 375px phones: nothing to the left of the switch, and tighter padding, so Done stays inside the pill. */
+  .bar { padding-left: 6px; gap: 2px; }
+  .root .bar .seg button { padding: 0 10px; gap: 4px; }
+  .bar a { padding: 0 8px; }
+  .bar .vr { margin: 6px 0; }
+  .bar .msg { padding-left: 10px; }
+}
+
+/* Comment-mode cursor and hover ring (fine pointers only; the arrow is hidden by a page style while they show) */
+/* The box is the dot's, centered on the pointer by the margin; the parts hang off it. */
+.cur { position: fixed; left: 0; top: 0; width: 14px; height: 14px; margin: -7px 0 0 -7px; z-index: 2147483647; pointer-events: none; will-change: transform; }
+.cur[hidden], .hover-ring[hidden], .root[data-mode="use"] .cur, .root[data-mode="use"] .hover-ring, .root.sheet-open .cur, .root.sheet-open .hover-ring { display: none; }
+.cur .ripple { position: absolute; left: -3px; top: -3px; width: 20px; height: 20px; border-radius: 50%; border: 3px solid #7FD3A8; animation: ttf-ripple 1.4s ease-out infinite; }
+.cur .ripple.r2 { animation-delay: .7s; }
+.cur .cdot {
+  position: absolute; left: 0; top: 0; width: 14px; height: 14px; border-radius: 50%;
+  background: #fff; border: 3px solid var(--acc); box-shadow: 0 0 12px 3px rgba(127, 211, 168, .9);
+  animation: ttf-glow 1.6s ease-in-out infinite;
+}
+.root .cur .ctag {
+  position: absolute; left: 25px; top: 21px; background: var(--acc); color: #fff; font-weight: 700; font-size: 15px;
+  padding: 4px 10px; border-radius: 999px; white-space: nowrap; box-shadow: 0 2px 8px rgba(0, 0, 0, .3);
+}
+.hover-ring { position: fixed; left: 0; top: 0; z-index: 2147483645; border: 2px dashed #7FD3A8; border-radius: 6px; pointer-events: none; }
+@keyframes ttf-ripple { 0% { transform: scale(.6); opacity: 1; } 100% { transform: scale(2.6); opacity: 0; } }
+@keyframes ttf-glow { 0%, 100% { filter: drop-shadow(0 0 4px rgba(127, 211, 168, .7)); } 50% { filter: drop-shadow(0 0 10px rgba(127, 211, 168, 1)) drop-shadow(0 0 20px rgba(127, 211, 168, .6)); } }
+@media (prefers-reduced-motion: reduce) {
+  .cur .ripple, .cur .cdot { animation: none; }
+  .cur .ripple { transform: scale(1.6); opacity: .8; }
+  .cur .ripple.r2 { display: none; }
+}
 
 /* pins: a zero-size layer in document coordinates */
 .pins { position: absolute; left: 0; top: 0; width: 0; height: 0; z-index: 2147483646; pointer-events: none; }

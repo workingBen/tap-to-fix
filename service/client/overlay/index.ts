@@ -275,6 +275,37 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       if (e.key === "Escape" && ui.sheetOpen) ui.dismissSheet();
     };
 
+    // The Comment cursor: fine pointers only, Comment mode only, never over the overlay or a sheet.
+    // Position comes from pointermove (one update per frame); the ring follows its target on scroll.
+    const fine = () => win.matchMedia("(hover: hover) and (pointer: fine)").matches;
+    let moveAt: { x: number; y: number; target: Element | null } | null = null;
+    let moveQueued = false;
+    const paintCursor = () => {
+      moveQueued = false;
+      if (!alive || !moveAt) return;
+      if (mode !== "comment" || ui.sheetOpen) ui.hideCursor();
+      else ui.moveCursor(moveAt.x, moveAt.y, moveAt.target);
+    };
+    const queueCursor = () => {
+      if (moveQueued) return;
+      moveQueued = true;
+      requestAnimationFrame(paintCursor);
+    };
+    const onPointerMove = (e: PointerEvent) => {
+      if (e.pointerType !== "mouse" || mode !== "comment" || !fine() || ui.sheetOpen || inOverlay(e)) {
+        moveAt = null;
+        ui.hideCursor();
+        return;
+      }
+      moveAt = { x: e.clientX, y: e.clientY, target: targetOf(e) };
+      queueCursor();
+    };
+    const onPointerLeave = () => {
+      moveAt = null;
+      ui.hideCursor();
+    };
+    cleanup.push(() => ui.hideCursor());
+
     updateBar();
     render();
     const capture = { capture: true };
@@ -285,6 +316,9 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     for (const type of ["touchstart", "touchend"]) listen(doc, type, onOtherInput, { capture: true, passive: true });
     for (const type of ["mousedown", "mouseup"]) listen(doc, type, onOtherInput, capture);
     listen(doc, "keydown", onKey, capture);
+    listen(doc, "pointermove", onPointerMove, { capture: true, passive: true });
+    listen(doc.documentElement, "pointerleave", onPointerLeave);
+    listen(win, "scroll", () => moveAt && queueCursor(), { capture: true, passive: true });
     // Coalesce bursts (resize, lazy images reflowing the page) into one layout per frame.
     let queued = false;
     const schedule = () => {
