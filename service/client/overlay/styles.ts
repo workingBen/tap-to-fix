@@ -10,7 +10,7 @@ export const OVERLAY_CSS =
 :host { all: initial !important; }
 * { box-sizing: border-box; margin: 0; }
 .root, .root * {
-  font-family: -apple-system, "Helvetica Neue", system-ui, sans-serif;
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", system-ui, sans-serif;
   font-size: 17px; line-height: 1.4; color: var(--ink);
   -webkit-font-smoothing: antialiased; letter-spacing: normal; text-transform: none;
 }
