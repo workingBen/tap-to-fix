@@ -863,6 +863,8 @@ test("a save the service refuses says why, and keeps the text", async ({ page })
   for (const [status, text] of [
     [401, "This link no longer works. Ask for a new one."],
     [403, "This page isn't on your review list."],
+    [413, "This comment is too long to save. Shorten it and try again."],
+    [429, "That's a lot of comments at once. Wait a minute and try again."],
     [500, "Couldn't save. Check your connection and try again."],
   ] as const) {
     await page.route("**/api/me/comments", (route) => route.fulfill({ status, body: "{}" }));

@@ -12,6 +12,8 @@ const SAVE_FAILED = "Couldn't save. Check your connection and try again.";
 const SAVE_REFUSED: Record<number, string> = {
   401: "This link no longer works. Ask for a new one.",
   403: "This page isn't on your review list.",
+  413: "This comment is too long to save. Shorten it and try again.",
+  429: "That's a lot of comments at once. Wait a minute and try again.",
 };
 /** A tap: the finger lifts within this distance and time of where it went down. */
 const TAP_SLOP_PX = 10;
