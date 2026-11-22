@@ -1,14 +1,9 @@
 name: test
 
-# Manual runs only for now. While the repo is private, Actions minutes come out of a paid budget.
-# When the repo goes public, replace this trigger block with:
-#
-#   on:
-#     pull_request:
-#     push:
-#       branches: [main]
-#     workflow_dispatch:
 on:
+  pull_request:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
