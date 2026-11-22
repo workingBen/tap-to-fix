@@ -56,11 +56,11 @@ describe("GET /api/me", () => {
     expect(asg.counts).toEqual({ total: 4, settled: 2, in_progress: 1, open: 1 });
   });
 
-  it("builds the url from a ?ttf= token too", async () => {
+  it("refuses a ?ttf= token", async () => {
     const { env, a } = await setup();
     await assign(env, a.id, "/one");
     const res = await (await import("./env")).call("/api/me?ttf=" + a.token, {}, env);
-    expect((await json(res)).assignments[0].url).toBe("https://greensprings.life/one#ttf=" + a.token);
+    expect(res.status).toBe(401);
   });
 
   it("flags is_new until opened, and is_updated after a later status change", async () => {

@@ -25,10 +25,11 @@ export function boot(doc: Document, win: Window, load: (url: string) => Promise<
     }
   };
   const loc = win.location;
-  // The fragment is preferred: browsers never send it to the host's server, logs or Referer.
+  // Only the fragment counts: browsers never send it to the host's server, logs or Referer.
+  // An old ?ttf= is still stripped from the address bar, but not used.
   const hash = pull(loc.hash);
   const query = pull(loc.search);
-  let token = hash.token || query.token;
+  let token = hash.token;
   if (hash.token !== null || query.token !== null) {
     win.history.replaceState(
       win.history.state,

@@ -35,7 +35,8 @@ export const requireOwner = createMiddleware<AppBindings>(async (c, next) => {
 });
 
 export const requireReviewer = createMiddleware<AppBindings>(async (c, next) => {
-  const token = bearer(c.req.header("Authorization")) ?? c.req.query("ttf") ?? null;
+  // Header only: a token in a query string can land in server logs.
+  const token = bearer(c.req.header("Authorization")) ?? null;
   if (!token) return c.json({ error: "Unauthorized" }, 401);
   const row = await c.env.DB.prepare(
     "SELECT id, name FROM reviewers WHERE token_hash = ? AND revoked_at IS NULL",

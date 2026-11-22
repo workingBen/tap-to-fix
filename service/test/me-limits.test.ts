@@ -36,7 +36,7 @@ function form(data: unknown, file?: { bytes: Uint8Array; type: string }) {
   return fd;
 }
 
-function post(env: Env, token: string, fd: FormData, headers: Record<string, string> = {}) {
+function post(env: Env, token: string, fd: FormData, headers: Record<string, string> = { Origin: "https://greensprings.life" }) {
   return reviewerFetch(env, token, "/api/me/comments", { method: "POST", body: fd, headers });
 }
 

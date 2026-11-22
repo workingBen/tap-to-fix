@@ -58,10 +58,10 @@ instance. It is not exact: two requests that arrive together can both pass the c
 can go slightly over. Refused requests are not counted. Owner endpoints are not rate limited,
 since they need the owner token.
 
-Known trade-offs:
+Tokens and origins:
 
-- An older `?ttf=TOKEN` link form still works, and a token in a query string can end up in logs.
-  New links never use it.
-- A request without an `Origin` header (a script rather than a browser) is accepted if its reviewer
-  token is valid. The token is the credential; the `Origin` check stops other websites from posting
-  with a reviewer's browser.
+- A reviewer token is accepted only in the `Authorization` header and in the page link's fragment
+  (`#ttf=TOKEN`), which browsers never send to a server. A `?ttf=TOKEN` query string is refused,
+  because it can end up in server logs; the loader still strips one from the address bar.
+- Saving a comment requires an `Origin` header equal to the site's registered origin. Browsers
+  always send it on a cross-site POST, so a request without one is refused.

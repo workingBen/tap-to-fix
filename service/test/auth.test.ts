@@ -67,10 +67,10 @@ describe("requireReviewer", () => {
     expect(res.status).toBe(200);
     expect(await res.json()).toEqual({ id: "r1", name: "Alexis", token });
   });
-  it("200 via ?ttf=", async () => {
+  it("401 via ?ttf=: a token in a query string can land in logs, so only the header counts", async () => {
     const env = makeEnv();
     await seedReviewer(env, token);
-    expect((await get(env, `/me?ttf=${token}`)).status).toBe(200);
+    expect((await get(env, `/me?ttf=${token}`)).status).toBe(401);
   });
   it("401 after revoke", async () => {
     const env = makeEnv();
@@ -79,6 +79,5 @@ describe("requireReviewer", () => {
       .bind("2026-11-20T01:00:00Z", "r1")
       .run();
     expect((await get(env, "/me", { Authorization: `Bearer ${token}` })).status).toBe(401);
-    expect((await get(env, `/me?ttf=${token}`)).status).toBe(401);
   });
 });

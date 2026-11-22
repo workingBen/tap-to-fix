@@ -27,7 +27,7 @@ function form(data: unknown, file?: { bytes: Uint8Array; type: string; name?: st
   return fd;
 }
 
-function post(env: Env, token: string, fd: FormData, headers: Record<string, string> = {}) {
+function post(env: Env, token: string, fd: FormData, headers: Record<string, string> = { Origin: "https://greensprings.life" }) {
   return reviewerFetch(env, token, "/api/me/comments", { method: "POST", body: fd, headers });
 }
 
@@ -125,6 +125,13 @@ describe("POST /api/me/comments", () => {
     const { env, a } = await setup();
     const res = await post(env, a.token, form({ ...base, path: "/nope" }));
     expect(res.status).toBe(403);
+  });
+
+  it("403 without an Origin header: comments come from a browser on the site", async () => {
+    const { env, a } = await setup();
+    const res = await post(env, a.token, form(base), {});
+    expect(res.status).toBe(403);
+    expect(await env.DB.prepare("SELECT COUNT(*) AS n FROM comments").first<{ n: number }>()).toEqual({ n: 0 });
   });
 
   it("403 and no CORS header for a foreign Origin", async () => {

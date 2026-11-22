@@ -216,7 +216,8 @@ me.post("/comments", rateLimit, commentBodyLimit, async (c) => {
     .first<{ id: string; origin: string }>();
   if (!row) return c.json({ error: "Not assigned" }, 403);
   const origin = c.req.header("Origin");
-  if (origin && origin !== row.origin) return c.json({ error: "Wrong origin" }, 403);
+  // Browsers always send Origin on a cross-site POST; a request without one is not from the site.
+  if (origin !== row.origin) return c.json({ error: "Wrong origin" }, 403);
 
   const id = newId();
   const now = new Date().toISOString();

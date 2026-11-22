@@ -7,6 +7,9 @@ import { join } from "node:path";
 import { measure } from "./measure";
 import globalSetup, { OWNER_TOKEN, SERVICE } from "./global-setup";
 
+// Comments must carry the Origin of the site they are for.
+const ORIGINS: Record<string, string> = { fixture: "http://localhost:4173", greensprings: "https://greensprings.life", "bonus-decade": "https://bonusdecade.com" };
+
 const out = process.argv[2];
 if (!out) throw new Error("usage: tsx e2e/shots-owner.ts <out-dir>");
 mkdirSync(out, { recursive: true });
@@ -55,7 +58,7 @@ try {
     for (const [i, status] of s.after.entries()) {
       const form = new FormData();
       form.set("data", JSON.stringify({ site: s.site, path: s.path, body: `Comment ${i + 1}` }));
-      const res = await fetch(`${SERVICE}/api/me/comments`, { method: "POST", headers: { Authorization: `Bearer ${s.who.token}` }, body: form });
+      const res = await fetch(`${SERVICE}/api/me/comments`, { method: "POST", headers: { Authorization: `Bearer ${s.who.token}`, Origin: ORIGINS[s.site] }, body: form });
       if (!res.ok) throw new Error(`comment → ${res.status}`);
       const { id } = (await res.json()) as { id: string };
       if (status) {
