@@ -435,6 +435,22 @@ async function batch(reviewerId: string): Promise<BatchComment[]> {
   return ((await res.json()) as { comments: BatchComment[] }).comments;
 }
 
+test("a lazy image below the fold does not hold up the screenshot", async ({ page }, testInfo) => {
+  const touch = !!testInfo.project.use.hasTouch;
+  const press = (l: ReturnType<Page["locator"]>) => (touch ? l.tap() : l.click());
+  const r = await freshReviewer(`Lazy ${testInfo.project.name}`);
+  await openAsReviewer(page, "/index.html", r.token);
+  await press(page.locator("h1"));
+  await sheet(page).locator("textarea").fill("Check the lazy image");
+  const save = sheet(page).getByRole("button", { name: "Save comment" });
+  const started = Date.now();
+  await press(save);
+  await expect(bar(page)).toContainText("Saved");
+  expect(Date.now() - started).toBeLessThan(6000);
+  const [c] = await batch(r.id);
+  expect(c.has_screenshot).toBe(true);
+});
+
 test("saving records the spot and a screenshot", async ({ page }, testInfo) => {
   const touch = !!testInfo.project.use.hasTouch;
   const press = (l: ReturnType<Page["locator"]>) => (touch ? l.tap() : l.click());

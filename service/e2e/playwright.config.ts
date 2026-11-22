@@ -19,7 +19,7 @@ export default defineConfig({
     {
       name: "firefox-desktop",
       use: { browserName: "firefox", viewport: { width: 1280, height: 800 } },
-      grep: /saving records the spot and a screenshot/,
+      grep: /saving records the spot and a screenshot|a lazy image below the fold does not hold up the screenshot/,
     },
   ],
 });
