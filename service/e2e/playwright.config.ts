@@ -1,6 +1,7 @@
 import { defineConfig, devices } from "@playwright/test";
 
-// Browsers come from the local cache (chromium-1228, firefox-1532); never `playwright install`.
+// Browsers: `npx playwright install chromium firefox` once. The pinned @playwright/test version
+// decides which builds it fetches.
 export default defineConfig({
   testDir: ".",
   testMatch: "*.spec.ts",
