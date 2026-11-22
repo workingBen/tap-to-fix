@@ -73,6 +73,7 @@ try {
     ["o-1440.png", { width: 1440, height: 900 }, false],
     ["o-1280.png", { width: 1280, height: 800 }, false],
     ["o-390.png", { width: 390, height: 844 }, true],
+    ["o-320.png", { width: 320, height: 700 }, true],
   ] as const) {
     const ctx = await browser.newContext({ viewport, deviceScaleFactor: mobile ? 3 : 1, isMobile: mobile, hasTouch: mobile });
     const page = await ctx.newPage();
@@ -92,6 +93,17 @@ try {
       await page.screenshot({ path: join(out, "o-assign-1440.png"), fullPage: true });
     }
     if (mobile) {
+      // The more menu open on a phone: it must not clip at the right edge.
+      const more = page.locator("[data-person] details.more > summary").first();
+      await more.scrollIntoViewIfNeeded();
+      await page.evaluate(() => window.scrollTo(0, 0));
+      await more.click();
+      const box = (await page.locator("[data-person] details.more .menu").first().boundingBox())!;
+      console.log("MENU", name, JSON.stringify({ left: box.x, right: box.x + box.width, viewport: viewport.width }));
+      await page.screenshot({ path: join(out, name.replace(".png", "-menu.png")) });
+      await more.click();
+    }
+    if (mobile && viewport.width === 390) {
       // The link flash after adding a reviewer.
       await page.locator("[data-adder=reviewer] > summary").click();
       await page.locator("form[data-form=reviewer]").getByLabel("Name").fill("Shawn");

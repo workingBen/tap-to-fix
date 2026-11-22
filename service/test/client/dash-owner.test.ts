@@ -274,10 +274,21 @@ describe("one column per reviewer", () => {
     expect(strips("r1")[0].querySelector("[data-copy]")!.textContent).toBe("Copy");
     expect(strips("r2").map((s) => s.querySelector("code")!.textContent)).toEqual(["/tap-to-fix:fix ben greensprings"]);
   });
-  it("the header shows the open count and the link state", () => {
-    const box = render();
-    expect(box.querySelector("[data-person=r1] .person-h")!.textContent).toContain("5 open comments · link on");
-    expect(box.querySelector("[data-person=r2] .person-h")!.textContent).toContain("1 open comment · link on");
+  it("the header subline uses the ready count, the in-progress total and the link state", () => {
+    const box = render({ overview: { ...overview, reviewers: [{ ...ALEXIS, unsettled_count: 9, ready_count: 5 }, BEN] } });
+    const sub = (id: string) => box.querySelector(`[data-person=${id}] .person-h .tu`)!.textContent;
+    expect(sub("r1")).toBe("5 open · 1 in progress · link on");
+    expect(sub("r2")).toBe("1 open · 1 in progress · link on");
+  });
+  it("the header subline leaves out a zero in-progress count, and says No comments yet with none", () => {
+    const box = render({
+      overview: {
+        reviewers: [{ ...ALEXIS, ready_count: 2 }, { ...BEN, unsettled_count: 0, ready_count: 0, revoked: true }],
+        assignments: [a({ id: "q1" }, { open: 2, settled: 1 }), a({ id: "q2", reviewer: ben })],
+      },
+    });
+    expect(box.querySelector("[data-person=r1] .person-h .tu")!.textContent).toBe("2 open · link on");
+    expect(box.querySelector("[data-person=r2] .person-h .tu")!.textContent).toBe("No comments yet · Link off");
   });
   it("a revoked reviewer's subline says Link off", () => {
     const box = render({ overview: { ...overview, reviewers: [overview.reviewers[0], { ...BEN, revoked: true }] } });

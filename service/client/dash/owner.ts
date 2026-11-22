@@ -245,11 +245,23 @@ function assignFormHtml(s: OwnerState, r: OwnerReviewer): string {
   );
 }
 
+/** "5 open · 1 in progress", in the page rows' words; "No comments yet" when the reviewer has none. */
+function subCounts(r: OwnerReviewer, mine: OwnerAssignment[]): string {
+  let inProgress = 0;
+  let total = 0;
+  for (const a of mine) {
+    inProgress += a.counts.in_progress;
+    total += a.counts.open + a.counts.in_progress + a.counts.settled;
+  }
+  if (total === 0 && r.ready_count === 0) return "No comments yet";
+  return `${r.ready_count} open` + (inProgress > 0 ? ` · ${inProgress} in progress` : "");
+}
+
 function personHtml(s: OwnerState, r: OwnerReviewer, batches: ReadyBatch[]): string {
   const sites = new Map(s.sites.map((x) => [x.slug, x]));
   const mine = s.overview.assignments.filter((a) => a.reviewer.id === r.id);
   const first = esc(firstName(r.name));
-  const sub = `${plural(r.unsettled_count, "open comment", "open comments")} · ${r.revoked ? `<span class="off">Link off</span>` : "link on"}`;
+  const sub = `${subCounts(r, mine)} · ${r.revoked ? `<span class="off">Link off</span>` : "link on"}`;
   const ready = batches
     .map((b) => `<div class="ready" data-ready><p>${plural(b.open, "comment", "comments")} ready to fix on ${esc(b.siteName)}</p>${commandHtml(b.command)}</div>`)
     .join("");
@@ -266,9 +278,9 @@ function personHtml(s: OwnerState, r: OwnerReviewer, batches: ReadyBatch[]): str
     `<section class="person" data-person="${esc(r.id)}" aria-labelledby="p-${esc(r.id)}">` +
     `<div class="person-h"><span class="av" aria-hidden="true">${initial(r.name)}</span>` +
     `<div class="grow"><h2 class="pname" id="p-${esc(r.id)}">${esc(r.name)}</h2><p class="tu">${sub}</p></div>` +
-    `<button type="button" class="btn quiet" data-action="reissue" data-id="${esc(r.id)}">${LINK}<span>New link</span></button>` +
+    `<div class="ctl"><button type="button" class="btn quiet" data-action="reissue" data-id="${esc(r.id)}">${LINK}<span>New link</span></button>` +
     menuHtml(r, batches) +
-    `</div><div class="person-err"></div>` +
+    `</div></div><div class="person-err"></div>` +
     (s.flash && s.flash.id === r.id ? flashHtml(s.flash) : "") +
     ready +
     pages +
@@ -384,7 +396,8 @@ button { font: inherit; color: inherit; }
 /* one column per reviewer */
 .people { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 40px; margin-top: 22px; align-items: start; }
 .person { min-width: 0; }
-.person-h { display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 2px solid var(--ink); }
+.person-h { position: relative; display: flex; align-items: center; gap: 12px; padding-bottom: 12px; border-bottom: 2px solid var(--ink); }
+.ctl { display: flex; align-items: center; flex: none; }
 .av { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: var(--bg); font-weight: 700; flex: none; }
 .pname { font: 600 22px/1.2 var(--hf); overflow-wrap: anywhere; }
 .person-err:empty { display: none; }
@@ -404,6 +417,7 @@ button { font: inherit; color: inherit; }
   text-align: left; font-size: 17px; font-weight: 600; color: var(--acc); cursor: pointer;
 }
 .mi:hover { background: var(--soft); }
+.mi svg { flex: none; }
 .menu > * + * { border-top: 1px solid var(--line); }
 .dl { padding-bottom: 10px; }
 .dl-s { font-size: 16px; color: var(--mut); padding: 0 16px 0 44px; }
@@ -460,6 +474,14 @@ button { font: inherit; color: inherit; }
 .notice { font: 400 21px/1.45 var(--hf); margin: 24px 0 0; }
 .muted { color: var(--mut); }
 
+/* phones: the controls move under the name rather than squeezing it; the menu spans the header */
+@media (max-width: 480px) {
+  .person-h { flex-wrap: wrap; row-gap: 2px; }
+  .person-h .grow { flex: 1 1 calc(100% - 52px); }
+  .ctl { flex-basis: 100%; box-sizing: border-box; padding-left: 42px; }
+  .more { position: static; }
+  .menu { left: 0; right: 0; width: auto; max-width: none; top: 100%; }
+}
 @media (min-width: 640px) {
   .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .assign .grid { grid-template-columns: minmax(0, 1fr); }

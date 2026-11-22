@@ -180,7 +180,7 @@ test("ready strip shows the command in the reviewer's column", async ({ page }) 
   await comment(r.token, "/other.html", "Fix the spacing");
   await page.goto(OWNER_URL());
   const quinn = column(page, "Quinn Ready");
-  await expect(quinn.locator(".person-h")).toContainText("1 open comment · link on");
+  await expect(quinn.locator(".person-h")).toContainText("1 open · link on");
   const strip = quinn.locator("[data-ready]", { hasText: "1 comment ready to fix on Fixture" });
   await expect(strip).toBeVisible();
   await expect(strip.locator("code")).toHaveText("/tap-to-fix:fix quinn fixture");
@@ -298,5 +298,7 @@ test("no horizontal scroll at 390 px with a 120-character title and a long path"
 
   await page.goto(OWNER_URL());
   await expect(column(page, "Dana Long").locator("[data-row]", { hasText: LONG_TITLE.slice(0, 40) })).toBeVisible();
+  // On a mobile viewport an overflow widens the layout viewport itself, so check the width too.
+  expect(await page.evaluate(() => window.innerWidth)).toBeLessThanOrEqual(390);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
