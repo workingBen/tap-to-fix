@@ -31,7 +31,7 @@ describe("plugin manifest", () => {
   it("plugin.json parses with the right name and version", () => {
     const p = readJson(".claude-plugin/plugin.json");
     expect(p.name).toBe("tap-to-fix");
-    expect(p.version).toBe("0.1.0");
+    expect(p.version).toBe("0.2.0");
     expect(p.license).toBe("MIT");
     expect(p.author?.name).toBe("workingBen");
     expect(typeof p.repository).toBe("string");
@@ -59,7 +59,7 @@ describe("skill docs", () => {
       for (const m of md.matchAll(/<TTF>\s+([a-z][a-z_-]*)/g)) named.add(m[1]);
       for (const m of md.matchAll(/`ttf\s+([a-z][a-z_-]*)/g)) named.add(m[1]);
     }
-    expect([...named]).toEqual(expect.arrayContaining(["batch", "status", "flush", "progress"]));
+    expect([...named]).toEqual(expect.arrayContaining(["batch", "status", "flush", "progress", "open"]));
     for (const n of named) expect(Object.keys(commands), `ttf ${n}`).toContain(n);
   });
 
@@ -135,8 +135,42 @@ describe("skill docs", () => {
     expect(md).toMatch(/Never report a crash as "wrong repo"/);
   });
 
+  it("fix skill with no arguments (or only a reviewer) lists with ttf open and picks with AskUserQuestion", () => {
+    const md = fix();
+    expect(md).toMatch(/## 2\. Pick a batch/);
+    expect(md).toContain("node <TTF> open");
+    expect(md).toContain("node <TTF> open <reviewer>");
+    expect(md).toContain("AskUserQuestion");
+    expect(md).toMatch(/most comments first/);
+    expect(md).toMatch(/Nothing waiting/);
+    expect(md).not.toMatch(/ask for it once/);
+    expect(md.indexOf("## 2. Pick a batch")).toBeLessThan(md.indexOf("## 3. Pull the batch"));
+  });
+
   it("no status or flush call in the skill passes --dir (folders live under ~/.tap-to-fix/batches)", () => {
     for (const cmd of commandText(fix())) expect(cmd).not.toMatch(/(status|flush)\b[^\n]*--dir/);
+  });
+});
+
+describe("list skill", () => {
+  const listPath = join(skillsDir, "list", "SKILL.md");
+  const list = () => readFileSync(listPath, "utf8");
+
+  it("exists with the frontmatter name and the trigger", () => {
+    expect(skillFiles()).toContain(listPath);
+    const md = list();
+    expect(md).toMatch(/^---\nname: list\n/);
+    expect(md).toContain("/tap-to-fix:list");
+  });
+
+  it("runs ttf open from the skill's base directory and changes nothing", () => {
+    const md = list();
+    expect(md).toContain("Base directory for this skill");
+    expect(md).toContain("<dir>/../../bin/ttf.mjs");
+    expect(md).toContain("node <TTF> open");
+    expect(md).not.toContain("CLAUDE_PLUGIN_ROOT");
+    expect(md).toMatch(/Shell variables do not survive between Bash calls/);
+    for (const cmd of commandText(md)) expect(cmd).not.toMatch(/<TTF> (status|batch|flush)\b/);
   });
 });
 

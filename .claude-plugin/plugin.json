@@ -1,6 +1,6 @@
 {
   "name": "tap-to-fix",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Reviewers tap a spot on your live site and leave a comment with a screenshot; Claude Code turns each reviewer's comments into a proofs review cycle and reports every comment's status back.",
   "author": {
     "name": "workingBen",

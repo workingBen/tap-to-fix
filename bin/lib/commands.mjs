@@ -6,6 +6,7 @@ import { existsSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { setStatus, flushPending, TOKEN_REJECTED } from "./status.mjs";
 import { progress } from "./progress.mjs";
+import { openBatches, openLines } from "./open.mjs";
 
 /** Exit codes: 0 ok, 1 error, 2 ambiguous/unknown reviewer. */
 export const EXIT = { ok: 0, error: 1, reviewer: 2 };
@@ -49,6 +50,19 @@ export const commands = {
       if (!api) return EXIT.error;
       const { reviewers } = await api.overview();
       for (const r of reviewers) ctx.out(`${r.name} · ${slug(r.name)} · ${r.id} · open ${r.ready_count}`);
+      return EXIT.ok;
+    },
+  },
+  open: {
+    usage: "ttf open [reviewer]",
+    summary: "List every comment not settled yet (open or in progress) by reviewer, site and page, with the fix command for each batch",
+    async run(args, ctx) {
+      const { pos } = parseArgs(args);
+      if (pos.length > 1) throw new Error("Usage: " + commands.open.usage);
+      const api = needConfig(ctx);
+      if (!api) return EXIT.error;
+      const found = await openBatches(api, pos[0]);
+      for (const line of openLines(found, ctx.now ? ctx.now() : new Date())) ctx.out(line);
       return EXIT.ok;
     },
   },
