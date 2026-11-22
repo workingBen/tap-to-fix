@@ -3,12 +3,12 @@ export type Mode = "comment" | "use";
 
 export const MODE_KEY = "ttf:mode";
 
-/** The remembered mode for this tab; anything missing or unexpected, or blocked storage, is "comment". */
+/** The remembered mode for this tab; anything missing or unexpected, or blocked storage, is "use". */
 export function readMode(win: Window): Mode {
   try {
-    return win.sessionStorage.getItem(MODE_KEY) === "use" ? "use" : "comment";
+    return win.sessionStorage.getItem(MODE_KEY) === "comment" ? "comment" : "use";
   } catch {
-    return "comment";
+    return "use";
   }
 }
 

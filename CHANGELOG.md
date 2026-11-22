@@ -11,6 +11,11 @@ All notable changes to tap-to-fix are listed here. The format follows
 - Reviewer links show a picture card when texted or pasted (iMessage, Slack): "Tap to Fix · Your pages to review".
   `npm run deploy` makes the image URL absolute using the saved service URL.
 
+### Changed
+
+- The comment layer opens in **Use the page** instead of **Comment**, so a reviewer's first tap works the page.
+  Once they pick Comment, it stays Comment across pages in that tab. The reviewer list now says to tap Comment first.
+
 ## 0.4.0 - 2026-11-22
 
 ### Added

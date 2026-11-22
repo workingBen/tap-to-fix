@@ -27,7 +27,10 @@ describe("linkcrypt", () => {
     expect(await openToken(TEST_LINK_KEY, "r2", sealed)).toBeNull();
     const other = "B".repeat(43);
     expect(await openToken(other, "r1", sealed)).toBeNull();
-    const flipped = sealed.slice(0, -2) + (sealed.endsWith("A") ? "B" : "A") + sealed.slice(-1);
+    // Change one character in the middle (the last ones can carry base64 padding bits), always to a different one.
+    const i = 10;
+    const flipped = sealed.slice(0, i) + (sealed[i] === "A" ? "B" : "A") + sealed.slice(i + 1);
+    expect(flipped).not.toBe(sealed);
     expect(await openToken(TEST_LINK_KEY, "r1", flipped)).toBeNull();
     expect(await openToken(TEST_LINK_KEY, "r1", "garbage")).toBeNull();
   });

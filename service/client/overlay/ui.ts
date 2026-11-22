@@ -88,7 +88,7 @@ export class OverlayUI {
   private mayDismiss: (() => boolean) | null = null;
   onPinTap: (n: number) => void = () => {};
   onModeChange: (m: Mode) => void = () => {};
-  private mode: Mode = "comment";
+  private mode: Mode = "use";
   private readonly cursor: HTMLDivElement;
   private readonly ring: HTMLDivElement;
 
@@ -117,7 +117,7 @@ export class OverlayUI {
     this.ring = el("div", { class: "hover-ring", "data-ttf": "ring", "aria-hidden": "true" });
     this.cursor.hidden = true;
     this.ring.hidden = true;
-    this.root = el("div", { class: "root", "data-mode": "comment" }, this.pinsLayer, this.ring, this.cursor, this.bar, this.sheet);
+    this.root = el("div", { class: "root", "data-mode": "use" }, this.pinsLayer, this.ring, this.cursor, this.bar, this.sheet);
     shadow.append(style, this.root);
     // Keystrokes in the comment box reach the page retargeted to this host, so the page's
     // "ignore keys while typing in a field" checks miss them and its shortcuts would fire.
