@@ -47,6 +47,8 @@ export type OwnerState = {
   assignFor: string | null;
   assign?: AssignDraft | null;
   flash: Flash | null;
+  /** Reviewers whose "N done" fold is open; kept across re-renders. */
+  foldsOpen?: string[];
 };
 export type PageCandidate = { site: string; path: string; title: string; lastAssignedTo: string[]; lastAssignedAt: string };
 export type ReadyBatch = { reviewerId: string; reviewerName: string; siteSlug: string; siteName: string; open: number; command: string };
@@ -79,7 +81,7 @@ export function reviewerLink(origin: string, token: string): string {
 }
 
 export const NOT_STORED_NOTE =
-  "This link was made before links could be copied. Tap New link once to make one you can copy and text.";
+  "This link was made before links could be copied. Tap New link (under More) once to make one you can copy and text.";
 
 /** The text message that carries a reviewer's link; names the sites their pages are on. */
 export function smsBody(siteNames: string[], url: string): string {
@@ -239,12 +241,24 @@ const CLOSE = svg('<path d="M6 6l12 12M18 6L6 18"/>');
 const COPY = svg('<rect x="9" y="9" width="11" height="11" rx="2"/><path d="M5 15V5a2 2 0 0 1 2-2h10"/>', 18);
 const DOWNLOAD = svg('<path d="M12 4v11M7 11l5 5 5-5M5 20h14"/>', 18);
 const OUT = svg('<path d="M14 4h6v6M20 4l-9 9M18 14v5a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h5"/>', 17);
+const LINK_OFF = svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/><path d="M4 4l16 16"/>', 18);
+const CHEVRON = svg('<path d="M9 6l6 6-6 6"/>', 16);
 const LINK = svg('<path d="M10 14a4 4 0 0 0 5.7 0l3-3a4 4 0 0 0-5.7-5.7l-1 1"/><path d="M14 10a4 4 0 0 0-5.7 0l-3 3a4 4 0 0 0 5.7 5.7l1-1"/>', 18);
 const MESSAGE = svg('<path d="M4 5h16v11H10l-5 4v-4H4z"/>', 18);
 const MORE = svg('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>');
 const PR = svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4M13 3.5L10.5 6 13 8.5"/>', 17);
 const SEARCH = svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>');
 const CHECK = svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 16).replace('stroke-width="2"', 'stroke-width="3"');
+
+/**
+ * The Tap to Fix logo (docs/assets/brand/logo.svg): the offset pin with a check cut out of it.
+ * The mask id is namespaced so it cannot clash with anything else on the page.
+ */
+const LOGO =
+  `<svg class="logo" aria-hidden="true" viewBox="0 0 54 64" width="27" height="32">` +
+  `<mask id="ttf-owner-logo-mask" maskUnits="userSpaceOnUse" x="0" y="0" width="54" height="64"><rect width="54" height="64" fill="#fff"/>` +
+  `<polyline points="18.5,24.5 24.5,30.5 36,18" fill="none" stroke="#000" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/></mask>` +
+  `<g mask="url(#ttf-owner-logo-mask)"><path fill="var(--acc)" d="M0 0L15 -12.86A15 15 0 1 0 5 -12.86Z" transform="translate(14 59) scale(1.3)"/></g></svg>`;
 
 const copyButton = (text: string, label = "Copy") =>
   `<button type="button" class="btn quiet copy" data-copy="${esc(text)}" data-label="${esc(label)}">${COPY}<span>${esc(label)}</span></button>`;
@@ -299,7 +313,7 @@ function flashHtml(f: Flash, s: Pick<OwnerState, "sites" | "overview">): string 
   const sms = smsHref(smsBody(reviewerSiteNames(s, f.id), f.url));
   const sub =
     f.kind === "link"
-      ? "Copy it or text it now. Copy link and Text link above bring it back later."
+      ? "Copy it or text it now. Copy link above, or Text link under More, brings it back later."
       : "Copy it, or text it from here if Messages didn't open.";
   return (
     `<div class="flash" data-flash role="status">` +
@@ -312,9 +326,19 @@ function flashHtml(f: Flash, s: Pick<OwnerState, "sites" | "overview">): string 
   );
 }
 
+/**
+ * The reviewer's ⋯ menu: the link actions used less often than Copy link (Text link, New link,
+ * Turn off link), then one offline batch download per site with open comments. While the link is
+ * off, New link sits in the header instead, so it is not repeated here.
+ */
 function menuHtml(r: OwnerReviewer, batches: ReadyBatch[]): string {
+  const id = esc(r.id);
   const items =
-    (r.revoked ? "" : `<button type="button" class="mi" data-action="revoke" data-id="${esc(r.id)}">Turn off link</button>`) +
+    (r.revoked
+      ? ""
+      : `<button type="button" class="mi" data-action="text-link" data-id="${id}">${MESSAGE}<span>Text link</span></button>` +
+        `<button type="button" class="mi" data-action="reissue" data-id="${id}">${LINK}<span>New link</span></button>` +
+        `<button type="button" class="mi" data-action="revoke" data-id="${id}">${LINK_OFF}<span>Turn off link</span></button>`) +
     batches
       .map((b) => {
         const label = `Download batch file for ${b.siteName}`;
@@ -345,12 +369,17 @@ function pageHtml(a: OwnerAssignment, site: Site | undefined): string {
       )
       .join("");
   const label = `Remove ${a.title} from ${firstName(a.reviewer.name)}'s list`;
+  const status = STATUS_LABEL[a.status];
+  // One compact entry: a status dot (its word is there for screen readers), the title, the site
+  // and path, the counts, then Page / PR links and a quiet remove button at the right.
   return (
-    `<li class="pg" data-row="${esc(a.id)}"><div class="grow">` +
-    `<p class="tt">${esc(a.title)}</p>` +
+    `<li class="pg" data-row="${esc(a.id)}">` +
+    `<span class="dot ${a.status}" aria-hidden="true" title="${status}"></span>` +
+    `<p class="tt">${esc(a.title)}</p><span class="st sr">${status}</span>` +
     `<p class="tu">${esc(site ? site.name + " " : "")}<span class="mono">${esc(a.path)}</span></p>` +
-    `<div class="meta"><span class="st ${a.status}">${STATUS_LABEL[a.status]}</span><span class="counts">${countsText(a)}</span>${links}</div>` +
-    `</div><button type="button" class="rm" data-action="remove" data-id="${esc(a.id)}" aria-label="${esc(label)}" title="Remove">${CLOSE}</button></li>`
+    `<p class="counts">${countsText(a)}</p>` +
+    (links ? `<div class="lk">${links}</div>` : "") +
+    `<button type="button" class="rm" data-action="remove" data-id="${esc(a.id)}" aria-label="${esc(label)}" title="Remove">${CLOSE}</button></li>`
   );
 }
 
@@ -462,47 +491,56 @@ function assignPanelHtml(s: OwnerState, reviewerId: string, d: AssignDraft, now:
   );
 }
 
-/** "5 open · 1 in progress", in the page rows' words; "No comments yet" when the reviewer has none. */
-function subCounts(r: OwnerReviewer, mine: OwnerAssignment[]): string {
-  let inProgress = 0;
-  let total = 0;
-  for (const a of mine) {
-    inProgress += a.counts.in_progress;
-    total += a.counts.open + a.counts.in_progress + a.counts.settled;
-  }
-  if (total === 0 && r.ready_count === 0) return "No comments yet";
-  return `${r.ready_count} open` + (inProgress > 0 ? ` · ${inProgress} in progress` : "");
+/**
+ * The "Ready to fix" strip at the top: one row per reviewer and site with open comments, each with
+ * the command that starts the review cycle and a Copy button. Nothing when no batch is ready.
+ */
+function readyHtml(s: OwnerState, batches: ReadyBatch[]): string {
+  if (!batches.length) return "";
+  const rows = batches
+    .map(
+      (b) =>
+        `<div class="rr" data-ready data-reviewer="${esc(b.reviewerId)}" data-site="${esc(b.siteSlug)}">` +
+        `<span class="av" aria-hidden="true">${initial(b.reviewerName)}</span>` +
+        `<p class="rt"><b>${esc(reviewerLabel(s.overview.reviewers, b.reviewerName))}</b> · ${b.open} open on ${esc(b.siteName)}</p>` +
+        commandHtml(b.command) +
+        `</div>`,
+    )
+    .join("");
+  return `<section class="readybox" aria-labelledby="h-ready"><h2 class="rh" id="h-ready">Ready to fix</h2>${rows}</section>`;
 }
 
 function personHtml(s: OwnerState, r: OwnerReviewer, batches: ReadyBatch[]): string {
   const sites = new Map(s.sites.map((x) => [x.slug, x]));
   const mine = s.overview.assignments.filter((a) => a.reviewer.id === r.id);
+  const active = mine.filter((a) => a.status !== "done");
+  const done = mine.filter((a) => a.status === "done");
+  const id = esc(r.id);
   const first = esc(firstName(r.name));
-  const sub = `${subCounts(r, mine)} · ${r.revoked ? `<span class="off">Link off</span>` : "link on"}`;
-  const ready = batches
-    .map((b) => `<div class="ready" data-ready><p>${plural(b.open, "comment", "comments")} ready to fix on ${esc(b.siteName)}</p>${commandHtml(b.command)}</div>`)
-    .join("");
-  const pages = mine.length
-    ? `<ul class="pgs">${mine.map((a) => pageHtml(a, sites.get(a.site))).join("")}</ul>`
-    : `<p class="none">No pages for ${first} yet.</p>`;
+  const rows = (list: OwnerAssignment[]) => `<ul class="pgs">${list.map((a) => pageHtml(a, sites.get(a.site))).join("")}</ul>`;
+  // Finished pages fold away under "N done", so the list stays short as reviews pile up.
+  const fold = done.length
+    ? `<details class="fold" data-fold="${id}"${s.foldsOpen?.includes(r.id) ? " open" : ""}>` +
+      `<summary>${CHEVRON}<span>${done.length} done</span></summary>${rows(done)}</details>`
+    : "";
+  const pages = mine.length ? (active.length ? rows(active) : "") + fold : `<p class="none">No pages for ${first} yet.</p>`;
   const add =
     s.sites.length === 0
       ? ""
-      : `<div class="add"><button type="button" class="btn quiet" data-action="assign" data-id="${esc(r.id)}">${PLUS}<span>Assign a page to ${esc(reviewerLabel(s.overview.reviewers, r.name))}</span></button></div>`;
+      : `<div class="add"><button type="button" class="btn quiet" data-action="assign" data-id="${id}" aria-label="${esc(`Assign a page to ${reviewerLabel(s.overview.reviewers, r.name)}`)}">${PLUS}<span>Assign a page</span></button></div>`;
+  // One slim header row: avatar, name, link state, then Copy link (New link while the link is off) and ⋯.
+  const main = r.revoked
+    ? `<button type="button" class="btn quiet hb" data-action="reissue" data-id="${id}">${LINK}<span>New link</span></button>`
+    : `<button type="button" class="btn quiet hb" data-action="copy-link" data-id="${id}">${COPY}<span>Copy link</span></button>`;
   return (
-    `<section class="person" data-person="${esc(r.id)}" aria-labelledby="p-${esc(r.id)}">` +
+    `<section class="person" data-person="${id}" aria-labelledby="p-${id}">` +
     `<div class="person-h"><span class="av" aria-hidden="true">${initial(r.name)}</span>` +
-    `<div class="grow"><h2 class="pname" id="p-${esc(r.id)}">${esc(r.name)}</h2><p class="tu">${sub}</p></div>` +
+    `<div class="who"><h2 class="pname" id="p-${id}">${esc(r.name)}</h2>` +
+    `<span class="state">${r.revoked ? `<span class="off">Link off</span>` : "link on"}</span></div>` +
+    main +
     menuHtml(r, batches) +
-    `<div class="ctl">` +
-    (r.revoked
-      ? ""
-      : `<button type="button" class="btn quiet" data-action="copy-link" data-id="${esc(r.id)}">${COPY}<span>Copy link</span></button>` +
-        `<button type="button" class="btn quiet" data-action="text-link" data-id="${esc(r.id)}">${MESSAGE}<span>Text link</span></button>`) +
-    `<button type="button" class="btn quiet" data-action="reissue" data-id="${esc(r.id)}">${LINK}<span>New link</span></button>` +
-    `</div></div><div class="person-err"></div>` +
+    `</div><div class="person-err"></div>` +
     (s.flash && s.flash.id === r.id ? flashHtml(s.flash, s) : "") +
-    ready +
     pages +
     add +
     `</section>`
@@ -539,12 +577,12 @@ export function renderOwner(state: OwnerState, now: Date = new Date()): string {
   const batches = readyBatches(state.overview, state.sites);
   const form = field("Name", "name", 'placeholder="Alexis"') + `<button type="submit" class="btn">Add</button>`;
   return (
-    `<h1 class="sr">tap-to-fix owner dashboard</h1>` +
-    `<div class="top"><p class="brand">tap-to-fix</p>` +
+    `<div class="top">${LOGO}<h1 class="brand"><span class="ttl">Tap to Fix</span> <span class="sub">Owner</span></h1>` +
     adder("reviewer", reviewers.length ? "Add a reviewer" : "Add your first reviewer", form, reviewers.length === 0) +
     `</div>` +
     (state.flash && !reviewers.some((r) => r.id === state.flash!.id) ? flashHtml(state.flash, state) : "") +
     (state.sites.length === 0 ? `<p class="empty">Add a site first. The form is under Sites, below.</p>` : "") +
+    readyHtml(state, batches) +
     (reviewers.length
       ? `<div class="people">${reviewers.map((r) => personHtml(state, r, batches.filter((b) => b.reviewerId === r.id))).join("")}</div>`
       : "") +
@@ -589,9 +627,12 @@ button { font: inherit; color: inherit; }
 .ico:hover { background: var(--soft); color: var(--ink); }
 .btn:focus-visible, .rm:focus-visible, .lnk:focus-visible, .mi:focus-visible, summary:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
 
-/* top bar */
-.top { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
-.brand { font: 600 24px/1.2 var(--hf); }
+/* top bar: the logo, "Tap to Fix" and "Owner", then Add a reviewer at the right */
+.top { display: flex; align-items: center; flex-wrap: wrap; gap: 10px 10px; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+.logo { flex: none; width: 24px; height: 28px; }
+.brand { font-size: 21px; line-height: 1.2; font-weight: 400; margin: 0; }
+.brand .ttl { font-weight: 750; letter-spacing: -0.02em; }
+.brand .sub { color: var(--mut); margin-left: 4px; }
 
 /* inline forms (Add a reviewer, Add a site): the toggle sits at the right, the form opens full width under it */
 .adder { margin-left: auto; display: flex; flex-direction: column; align-items: flex-end; }
@@ -616,15 +657,18 @@ button { font: inherit; color: inherit; }
 .err { margin: 0; color: var(--warn); background: var(--warn-bg); border-radius: 8px; padding: 8px 12px; font-size: 17px; }
 .err[hidden] { display: none; }
 
-/* one column per reviewer */
-.people { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 380px), 1fr)); gap: 40px; margin-top: 22px; align-items: start; }
+/* one list per reviewer: two columns on a laptop, one on a phone */
+.people { display: grid; grid-template-columns: minmax(0, 1fr); gap: 32px 56px; margin-top: 26px; align-items: start; }
+@media (min-width: 760px) { .people { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 .person { min-width: 0; }
-/* Row 1: avatar, name and the more menu. Row 2, under the name: Copy link, Text link, New link. */
-.person-h { position: relative; display: flex; flex-wrap: wrap; align-items: center; gap: 2px 12px; padding-bottom: 8px; border-bottom: 2px solid var(--ink); }
-.person-h .grow { flex: 1 1 0%; }
-.ctl { display: flex; flex-wrap: wrap; align-items: center; flex: 0 0 100%; box-sizing: border-box; padding-left: 42px; }
-.av { display: inline-grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; background: var(--ink); color: var(--bg); font-weight: 700; flex: none; }
-.pname { font: 600 22px/1.2 var(--hf); overflow-wrap: anywhere; }
+/* One slim row: avatar, name and link state, then Copy link and the more menu. */
+.person-h { position: relative; display: flex; align-items: center; gap: 10px; padding-bottom: 6px; border-bottom: 2px solid var(--ink); }
+.who { flex: 1 1 auto; min-width: 0; display: flex; flex-wrap: wrap; align-items: baseline; gap: 0 10px; }
+.av { display: inline-grid; place-items: center; width: 30px; height: 30px; border-radius: 50%; background: var(--ink); color: var(--bg); font-size: 14px; font-weight: 700; flex: none; }
+.pname { font-size: 19px; line-height: 1.3; font-weight: 700; overflow-wrap: anywhere; min-width: 0; }
+.state { font-size: 16px; color: var(--mut); white-space: nowrap; }
+.btn.hb { flex: none; min-height: 38px; padding: 0 10px; font-size: 16px; gap: 6px; }
+.person-h .ico { width: 38px; height: 38px; }
 .person-err:empty { display: none; }
 .person-err .err { margin-top: 10px; }
 
@@ -657,33 +701,81 @@ button { font: inherit; color: inherit; }
 .flash-row a.btn { text-decoration: none; }
 .flash-note { font: 400 19px/1.45 var(--hf); }
 
-/* ready strip: a rule at the left, no box */
-.ready { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; margin: 14px 0 4px; padding: 12px 0 12px 14px; border-left: 4px solid var(--acc); }
-.ready p { font-weight: 600; }
-.cmd { display: inline-flex; align-items: center; gap: 4px; max-width: 100%; min-height: 44px; padding: 0 4px 0 12px; background: var(--surf); border: 1px solid var(--line); border-radius: 8px; }
-.cmd code { font-size: 15px; font-weight: 600; user-select: all; min-width: 0; padding: 8px 0; }
+/* Ready to fix: the strip at the top, one row per reviewer and site, each with its command */
+.readybox { margin-top: 18px; padding: 10px 16px 10px; background: var(--surf); border: 1px solid var(--line); border-left: 4px solid var(--acc); border-radius: 12px; }
+.rh { font-size: 14px; line-height: 1.4; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--acc); margin-bottom: 2px; }
+.rr { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; padding: 5px 0; }
+.rr + .rr { border-top: 1px solid var(--line); }
+.rt { flex: 1 1 240px; min-width: 0; font-size: 17px; overflow-wrap: anywhere; }
+.rr .av { width: 26px; height: 26px; font-size: 14px; }
+.cmd { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; padding: 3px 3px 3px 10px; background: var(--bg); border: 1px solid var(--line); border-radius: 8px; }
+.cmd code { font-size: 15px; font-weight: 500; user-select: all; min-width: 0; padding: 4px 0; }
 .cmd .tok { white-space: nowrap; }
-.cmd .btn { flex: none; }
+.cmd .btn { flex: none; min-height: 34px; padding: 0 10px; font-size: 15px; gap: 5px; background: var(--soft); border-radius: 6px; }
+.cmd .btn svg { width: 16px; height: 16px; }
 
-/* pages: ruled rows */
+/* pages: one compact entry each. Dot | title, site and path, counts | Page and PR links | remove. */
 .pgs { list-style: none; margin: 0; padding: 0; }
-.pg { display: flex; gap: 12px; align-items: flex-start; padding: 14px 0; border-bottom: 1px solid var(--line); }
-.pg .err { margin-top: 8px; }
-.meta { display: flex; flex-wrap: wrap; align-items: center; gap: 0 14px; margin-top: 0; }
-.st { display: inline-block; font-size: 15px; font-weight: 600; padding: 3px 11px; border-radius: 999px; background: var(--line); color: var(--ink); white-space: nowrap; }
-.st.open { background: var(--warn-bg); color: var(--warn); }
-.st.in_progress { background: var(--soft); color: var(--acc); }
-.st.done { background: var(--acc); color: var(--acc-ink); }
+.pg {
+  position: relative; display: grid; grid-template-columns: 10px minmax(0, 1fr) auto auto; column-gap: 10px;
+  grid-template-areas: "dot tt lk rm" ". tu lk rm" ". cn lk rm" ". err err err";
+  padding: 10px 0; border-bottom: 1px solid var(--line);
+}
+.pg > .tt { grid-area: tt; font-family: inherit; font-size: 18px; font-weight: 650; line-height: 1.3; }
+.pg > .tu { grid-area: tu; }
+.pg > .counts { grid-area: cn; }
+.pg > .lk { grid-area: lk; align-self: center; display: flex; flex-direction: column; align-items: flex-start; gap: 2px; }
+.pg > .rm { grid-area: rm; }
+.pg > .err { grid-area: err; margin-top: 8px; }
+.pg .tu .mono { font-size: 15px; }
+.dot { grid-area: dot; align-self: start; width: 10px; height: 10px; margin-top: 7px; box-sizing: border-box; border-radius: 50%; }
+.dot.open { background: var(--warn); }
+.dot.not_started { border: 2px solid var(--mut); }
+.dot.in_progress { border: 2px solid var(--acc); background: var(--soft); }
+.dot.done { background: var(--acc); }
 .counts { font-size: 16px; color: var(--mut); }
 .counts b { color: var(--warn); font-weight: 700; }
-.lnk { display: inline-flex; align-items: center; gap: 6px; min-height: 44px; color: var(--acc); font-weight: 600; font-size: 16px; text-decoration: none; white-space: nowrap; }
+.lnk { display: inline-flex; align-items: center; gap: 5px; min-height: 28px; color: var(--acc); font-weight: 600; font-size: 16px; text-decoration: none; white-space: nowrap; }
+.lnk svg { width: 16px; height: 16px; flex: none; }
 .lnk:hover span { text-decoration: underline; }
 .lnk.plain { color: var(--mut); }
 .lnk.plain:hover span { text-decoration: none; }
-.rm { display: grid; place-items: center; flex: none; width: 44px; height: 44px; margin-top: -8px; border: 0; background: none; color: var(--mut); border-radius: 50%; cursor: pointer; }
-.rm:hover { background: var(--warn-bg); color: var(--warn); }
-.none { color: var(--mut); padding: 14px 0; border-bottom: 1px solid var(--line); }
-.add { margin-top: 6px; margin-left: -10px; }
+.rm { display: grid; place-items: center; align-self: start; flex: none; width: 32px; height: 32px; margin: -4px -6px 0 4px; border: 0; background: none; color: var(--mut); opacity: .6; border-radius: 50%; cursor: pointer; }
+.rm svg { width: 16px; height: 16px; }
+.rm:hover, .rm:focus-visible { opacity: 1; background: var(--warn-bg); color: var(--warn); }
+.none { color: var(--mut); padding: 12px 0; border-bottom: 1px solid var(--line); }
+/* finished pages fold into "N done" */
+.fold > summary { display: flex; align-items: center; gap: 6px; min-height: 40px; color: var(--mut); font-size: 16px; font-weight: 600; cursor: pointer; list-style: none; border-bottom: 1px solid var(--line); }
+.fold > summary::-webkit-details-marker { display: none; }
+.fold > summary svg { transition: transform .15s; }
+.fold[open] > summary svg { transform: rotate(90deg); }
+.fold > summary:hover { color: var(--ink); }
+.add { margin-top: 4px; margin-left: -10px; }
+.add .btn { min-height: 40px; font-size: 16px; }
+
+/* touch screens: every control keeps a 44px target */
+@media (pointer: coarse) {
+  .btn.hb, .person-h .ico, .cmd .btn, .add .btn, .fold > summary { min-height: 44px; }
+  .person-h .ico { width: 44px; height: 44px; }
+  .lnk { min-height: 44px; }
+  .rm { width: 44px; height: 44px; margin: -10px -10px 0 0; opacity: .8; }
+}
+/* phones: the Page and PR links go on the counts line */
+@media (max-width: 560px) {
+  .pg { grid-template-areas: "dot tt tt rm" ". tu tu rm" ". cn lk lk" ". err err err"; }
+  .pg > .counts { align-self: center; }
+  .pg > .lk { flex-direction: row; flex-wrap: wrap; justify-content: flex-end; gap: 0 14px; }
+  .top { gap: 10px 8px; }
+  .logo { width: 22px; height: 26px; }
+  .brand { font-size: 18px; }
+  .brand .sub { margin-left: 2px; }
+  .top .adder > summary { padding: 0 12px; font-size: 16px; gap: 4px; }
+  .top .adder > summary svg { width: 18px; height: 18px; }
+  .readybox { padding: 8px 12px; }
+  .rt { flex: 1 1 0%; }
+  .rr .cmd { flex: 1 1 100%; }
+  .rr .cmd code { flex: 1 1 auto; }
+}
 
 /* Assign pages: the one raised surface. A 600px panel at the right on a laptop, full screen on a phone. */
 html.ttf-lock { overflow: hidden; }
@@ -750,9 +842,8 @@ html.ttf-lock { overflow: hidden; }
 .notice { font: 400 21px/1.45 var(--hf); margin: 24px 0 0; }
 .muted { color: var(--mut); }
 
-/* phones: the controls move under the name rather than squeezing it; the menu spans the header */
+/* phones: the menu spans the header */
 @media (max-width: 480px) {
-  .ctl { padding-left: 0; margin-left: -10px; flex-basis: calc(100% + 10px); }
   .more { position: static; }
   .menu { left: 0; right: 0; width: auto; max-width: none; top: 100%; }
 }
@@ -853,7 +944,22 @@ export async function mountOwner(win: Window): Promise<void> {
     }
   }
 
-  const state: OwnerState = { sites: [], overview: { reviewers: [], assignments: [] }, assignFor: null, assign: null, flash: null };
+  const state: OwnerState = { sites: [], overview: { reviewers: [], assignments: [] }, assignFor: null, assign: null, flash: null, foldsOpen: [] };
+
+  // A reviewer's "N done" fold stays as the owner left it when the page re-renders. "toggle" does
+  // not bubble, so it is caught on the way down.
+  main.addEventListener(
+    "toggle",
+    (ev) => {
+      const fold = ev.target as HTMLElement | null;
+      const id = fold?.matches?.("details.fold[data-fold]") ? fold.getAttribute("data-fold")! : null;
+      if (!id) return;
+      const open = (fold as HTMLDetailsElement).open;
+      state.foldsOpen = (state.foldsOpen ?? []).filter((x) => x !== id);
+      if (open) state.foldsOpen.push(id);
+    },
+    true,
+  );
 
   main.addEventListener("submit", (ev) => {
     const form = (ev.target as Element | null)?.closest?.("form[data-form]") as HTMLFormElement | null;
@@ -1308,7 +1414,7 @@ export async function mountOwner(win: Window): Promise<void> {
   /** A --warn line next to the control that failed: in the page row, or under the reviewer's header. */
   function failNear(el: HTMLElement, res: { status: number; error?: string }): void {
     if (res.status === 401 || res.status === 403) return forgetToken();
-    const spot = (el.closest(".pg")?.querySelector(".grow") ?? el.closest(".person")?.querySelector(".person-err")) as HTMLElement | null;
+    const spot = (el.closest(".pg") ?? el.closest(".person")?.querySelector(".person-err")) as HTMLElement | null;
     if (!spot) return;
     let line = spot.querySelector(":scope > .err") as HTMLElement | null;
     if (!line) {

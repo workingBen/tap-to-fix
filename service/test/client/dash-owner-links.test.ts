@@ -44,24 +44,28 @@ describe("the text message", () => {
 });
 
 describe("column header", () => {
-  it("a column with its link on has Copy link and Text link before New link", () => {
-    const ctl = render().querySelector("[data-person=r1] .ctl")!;
-    const labels = [...ctl.querySelectorAll("button")].map((b) => b.textContent);
-    expect(labels).toEqual(["Copy link", "Text link", "New link"]);
-    for (const b of ctl.querySelectorAll("button")) expect(b.querySelector("svg")).not.toBeNull();
-    expect(render().querySelector("[data-person=r1] .person-h details.more")).not.toBeNull();
+  it("a column with its link on has Copy link in the header and Text link, New link and Turn off link under More", () => {
+    const head = render().querySelector("[data-person=r1] .person-h")!;
+    const outside = [...head.querySelectorAll("button")].filter((b) => !b.closest("details.more"));
+    expect(outside.map((b) => b.textContent)).toEqual(["Copy link"]);
+    expect(head.querySelector(".state")!.textContent).toBe("link on");
+    const menu = head.querySelector("details.more .menu")!;
+    expect([...menu.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["Text link", "New link", "Turn off link"]);
+    for (const b of head.querySelectorAll("button")) expect(b.querySelector("svg")).not.toBeNull();
   });
 
-  it("a column whose link is off has only New link", () => {
-    const ctl = render().querySelector("[data-person=r2] .ctl")!;
-    expect([...ctl.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["New link"]);
+  it("a column whose link is off has only New link, in the header, and says Link off", () => {
+    const head = render().querySelector("[data-person=r2] .person-h")!;
+    expect([...head.querySelectorAll("button")].map((b) => b.textContent)).toEqual(["New link"]);
+    expect(head.querySelector("details.more")).toBeNull();
+    expect(head.querySelector(".state")!.textContent).toBe("Link off");
   });
 
   it("the not-stored note sits in that reviewer's column, in plain words", () => {
     const box = render({ flash: { kind: "missing", id: "r1", name: "Alexis Rivera" } });
     const note = box.querySelector("[data-person=r1] [data-flash]")!;
     expect(note.textContent).toContain(NOT_STORED_NOTE);
-    expect(NOT_STORED_NOTE).toBe("This link was made before links could be copied. Tap New link once to make one you can copy and text.");
+    expect(NOT_STORED_NOTE).toBe("This link was made before links could be copied. Tap New link (under More) once to make one you can copy and text.");
     expect(note.querySelector("code")).toBeNull();
   });
 

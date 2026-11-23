@@ -191,7 +191,7 @@ describe("renderOwner", () => {
         overview: { reviewers: [{ ...ALEXIS, ready_count: 7 }], assignments: [a({ status: "open" }, { open: 7 })] },
       }),
     );
-    expect(html).toContain("7 comments ready to fix on Bonus Decade");
+    expect(html).toContain("<b>Alexis</b> · 7 open on Bonus Decade");
     expect(html).toContain("/tap-to-fix:fix alexis bonus-decade");
     // The command breaks only at spaces: each word is kept whole, and the copied text is exact.
     const box = document.createElement("div");
@@ -265,32 +265,46 @@ describe("one column per reviewer", () => {
     expect(titles("r1")).toEqual(["Gallery", "Sauna protocol", "Digital Detox Retreat", "Virtual EMF Assessment"]);
     expect(titles("r2")).toEqual(["Gifts buying club", "Home page"]);
   });
-  it("each column has its ready strips with the command and a Copy button", () => {
+  it("the Ready to fix strip at the top has one row per reviewer and site, with the command and a Copy button", () => {
     const box = render();
-    const strips = (id: string) => [...box.querySelectorAll(`[data-person=${id}] [data-ready]`)];
-    expect(strips("r1").map((s) => s.querySelector("p")!.textContent)).toEqual([
-      "4 comments ready to fix on Greensprings Longevity",
-      "1 comment ready to fix on Alexis Art",
+    const strip = box.querySelector(".readybox")!;
+    expect(strip.querySelector(".rh")!.textContent).toBe("Ready to fix");
+    expect(strip.closest("[data-person]")).toBeNull();
+    const rows = [...strip.querySelectorAll("[data-ready]")];
+    expect(rows.map((r) => r.querySelector(".rt")!.textContent)).toEqual([
+      "Alexis · 4 open on Greensprings Longevity",
+      "Alexis · 1 open on Alexis Art",
+      "Ben · 1 open on Greensprings Longevity",
     ]);
-    expect(strips("r1")[0].querySelector("code")!.textContent).toBe("/tap-to-fix:fix alexis greensprings");
-    expect(strips("r1")[0].querySelector("[data-copy]")!.textContent).toBe("Copy");
-    expect(strips("r2").map((s) => s.querySelector("code")!.textContent)).toEqual(["/tap-to-fix:fix ben greensprings"]);
+    expect(rows.map((r) => r.getAttribute("data-reviewer"))).toEqual(["r1", "r1", "r2"]);
+    expect(rows[0].querySelector("code")!.textContent).toBe("/tap-to-fix:fix alexis greensprings");
+    expect(rows[0].querySelector("[data-copy]")!.textContent).toBe("Copy");
+    expect(rows[2].querySelector("code")!.textContent).toBe("/tap-to-fix:fix ben greensprings");
+    // Nothing ready, no strip.
+    expect(render({ overview: { ...overview, assignments: [] } }).querySelector(".readybox")).toBeNull();
   });
-  it("the header subline uses the ready count, the in-progress total and the link state", () => {
-    const box = render({ overview: { ...overview, reviewers: [{ ...ALEXIS, unsettled_count: 9, ready_count: 5 }, BEN] } });
-    const sub = (id: string) => box.querySelector(`[data-person=${id}] .person-h .tu`)!.textContent;
-    expect(sub("r1")).toBe("5 open · 1 in progress · link on");
-    expect(sub("r2")).toBe("1 open · 1 in progress · link on");
+  it("the header row shows only the link state next to the name", () => {
+    const box = render();
+    expect(box.querySelector("[data-person=r1] .person-h .state")!.textContent).toBe("link on");
+    expect(box.querySelector("[data-person=r1] .person-h .pname")!.textContent).toBe("Alexis Rivera");
   });
-  it("the header subline leaves out a zero in-progress count, and says No comments yet with none", () => {
-    const box = render({
-      overview: {
-        reviewers: [{ ...ALEXIS, ready_count: 2 }, { ...BEN, unsettled_count: 0, ready_count: 0, revoked: true }],
-        assignments: [a({ id: "q1" }, { open: 2, settled: 1 }), a({ id: "q2", reviewer: ben })],
-      },
-    });
-    expect(box.querySelector("[data-person=r1] .person-h .tu")!.textContent).toBe("2 open · link on");
-    expect(box.querySelector("[data-person=r2] .person-h .tu")!.textContent).toBe("No comments yet · Link off");
+  it("active pages are listed and done pages fold into N done, closed unless the owner opened it", () => {
+    const box = render();
+    const ben = box.querySelector("[data-person=r2]")!;
+    expect([...ben.querySelectorAll(":scope > .pgs [data-row] .tt")].map((t) => t.textContent)).toEqual(["Gifts buying club"]);
+    const fold = ben.querySelector("details.fold")!;
+    expect(fold.querySelector("summary")!.textContent).toBe("1 done");
+    expect(fold.hasAttribute("open")).toBe(false);
+    expect([...fold.querySelectorAll("[data-row] .tt")].map((t) => t.textContent)).toEqual(["Home page"]);
+    expect(box.querySelector("[data-person=r1] details.fold")).toBeNull();
+    expect(render({ foldsOpen: ["r2"] }).querySelector("[data-person=r2] details.fold")!.hasAttribute("open")).toBe(true);
+  });
+  it("each page has a status dot, with the status in words for screen readers", () => {
+    const box = render();
+    expect(box.querySelector("[data-row=p1] .dot")!.className).toBe("dot open");
+    expect(box.querySelector("[data-row=p3] .dot")!.className).toBe("dot not_started");
+    expect(box.querySelector("[data-row=p4] .dot")!.className).toBe("dot done");
+    expect(box.querySelector("[data-row=p3] .st.sr")!.textContent).toBe("Not started");
   });
   it("a revoked reviewer's subline says Link off", () => {
     const box = render({ overview: { ...overview, reviewers: [overview.reviewers[0], { ...BEN, revoked: true }] } });
@@ -308,9 +322,10 @@ describe("one column per reviewer", () => {
   it("Assign a page to <First> at the end of each column", () => {
     const box = render();
     const btn = (id: string) => box.querySelector(`[data-person=${id}] [data-action=assign]`)!;
-    expect(btn("r1").textContent).toBe("Assign a page to Alexis");
+    expect(btn("r1").textContent).toBe("Assign a page");
+    expect(btn("r1").getAttribute("aria-label")).toBe("Assign a page to Alexis");
     expect(btn("r1").getAttribute("data-id")).toBe("r1");
-    expect(btn("r2").textContent).toBe("Assign a page to Ben");
+    expect(btn("r2").getAttribute("aria-label")).toBe("Assign a page to Ben");
   });
   it("the top bar has Add a reviewer", () => {
     expect(render().querySelector(".top [data-adder=reviewer] > summary")!.textContent).toBe("Add a reviewer");
@@ -520,8 +535,8 @@ describe("assign pages panel", () => {
         NOW,
       );
       expect([...box.querySelectorAll("[data-action=assign-to]")].map((b) => b.textContent)).toEqual(["Alexis Rivera", "Ben", "Alexis Smith"]);
-      expect(box.querySelector("[data-person=r1] [data-action=assign]")!.textContent).toBe("Assign a page to Alexis Rivera");
-      expect(box.querySelector("[data-person=r2] [data-action=assign]")!.textContent).toBe("Assign a page to Ben");
+      expect(box.querySelector("[data-person=r1] [data-action=assign]")!.getAttribute("aria-label")).toBe("Assign a page to Alexis Rivera");
+      expect(box.querySelector("[data-person=r2] [data-action=assign]")!.getAttribute("aria-label")).toBe("Assign a page to Ben");
       expect(box.querySelector("[data-action=assign-submit]")!.textContent).toBe("Assign 1 page to Alexis Smith");
     });
     it("the panel body is a fieldset, disabled while busy", () => {
