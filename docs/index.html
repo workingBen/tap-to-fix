@@ -1,0 +1,162 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Tap to Fix: tap any spot on the page, say what to fix</title>
+<meta name="description" content="Reviewers tap your live site on their phone and say what to fix. Claude Code fixes each comment and tells them when it's done. A free, open-source Claude Code plugin.">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Tap to Fix">
+<meta property="og:description" content="Tap any spot on the page. Say what to fix.">
+<meta property="og:image" content="https://workingben.github.io/tap-to-fix/assets/social-card.jpg">
+<meta property="og:image:width" content="1200">
+<meta property="og:image:height" content="630">
+<meta name="twitter:card" content="summary_large_image">
+<link rel="stylesheet" href="site.css">
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <div>
+      <h1>Tap to Fix</h1>
+      <p class="sub">Tap any spot on the page.<br>Say what to fix.</p>
+      <p class="lede">Your reviewers comment on the live site from their phone. Claude Code fixes each comment in a review cycle and tells them when it's done.</p>
+      <pre class="cmd"><b>/plugin</b> marketplace add workingBen/proofs
+<b>/plugin</b> install proofs@proofs
+<b>/plugin</b> marketplace add workingBen/tap-to-fix
+<b>/plugin</b> install tap-to-fix@tap-to-fix</pre>
+      <div class="acts">
+        <a class="btn" href="#install">Get started</a>
+        <a class="ghost" href="https://github.com/workingBen/tap-to-fix">View on GitHub</a>
+      </div>
+    </div>
+    <div class="ph">
+      <div class="phone"><img src="assets/pinned.jpg" width="585" height="1266" alt="A live page on a phone with a numbered pin on its “Book your assessment” button, and the Tap to Fix bar at the bottom: Comment, Use the page, Done."></div>
+      <div class="note" aria-hidden="true"><small>NOTE 1</small>Should this button be full width on mobile?</div>
+    </div>
+  </div>
+</header>
+
+<main>
+  <section class="band" id="how">
+    <div class="wrap">
+      <p class="k">How it works</p>
+      <h2>From a tap to a fix</h2>
+      <p class="intro">Reviewers need no account and nothing to install. Ordinary visitors to your site never see any of it.</p>
+      <ol class="steps">
+        <li>
+          <div class="phone"><img src="assets/compose.jpg" width="585" height="1266" loading="lazy" alt="A reviewer's comment box on the live page: “What should change here? The link ‘Book your assessment’”, with the comment “Should this button be full width on mobile?” typed in."></div>
+          <h3>A reviewer taps</h3>
+          <p>They open their private link, tap the spot that looks wrong and say what should change. A screenshot and the exact element come along.</p>
+        </li>
+        <li>
+          <div class="phone"><img src="assets/odash.jpg" width="585" height="1266" loading="lazy" alt="The owner dashboard showing “4 comments ready to fix on Greensprings Longevity” and the command /tap-to-fix:fix alexis greensprings with a Copy button."></div>
+          <h3>You run one command</h3>
+          <p>Your dashboard shows who has comments waiting and the command to run. In Claude Code, <code>/tap-to-fix:fix</code> works through them as a review cycle, one pull request per fix.</p>
+        </li>
+        <li>
+          <div class="phone"><img src="assets/rdash.jpg" width="585" height="1266" loading="lazy" alt="The reviewer's list of pages, with “Updated since you looked” and “All done” labels."></div>
+          <h3>They see it done</h3>
+          <p>Each comment's status goes back to the reviewer as it's fixed, so they know what changed without asking.</p>
+        </li>
+      </ol>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <p class="k">Two dashboards</p>
+      <h2>One for you, one for them</h2>
+      <div class="duo">
+        <figure>
+          <img src="assets/owner-dashboard.jpg" width="1440" height="900" loading="lazy" alt="The owner dashboard: one column per reviewer, with their pages, open comments, pull request links and the command to run.">
+          <figcaption><b>Yours:</b> every reviewer, their pages, what's open, and the command to run. Copy or text a reviewer their link from here.</figcaption>
+        </figure>
+        <figure>
+          <img src="assets/reviewer-dashboard.jpg" width="1440" height="900" loading="lazy" alt="The reviewer's page list: pages grouped by site, each with its comment count and status.">
+          <figcaption><b>Theirs:</b> the pages to review, grouped by site, with what's being fixed and what's done.</figcaption>
+        </figure>
+      </div>
+    </div>
+  </section>
+
+  <section class="band">
+    <div class="wrap">
+      <p class="k">Start to finish</p>
+      <h2>Watch a real comment become a real fix</h2>
+      <div class="film">
+        <div class="film-phone">
+          <div class="phone screen" role="img" aria-label="A phone showing the Virtual EMF Assessment page at greensprings.life. The “Book your assessment” button stops halfway across. A reviewer taps it, a pin appears, and the comment box reads “Should this button be full width on mobile?”. Then the page changes: both buttons now span the full width.">
+            <img class="f-before" src="assets/fix-before.jpg" width="585" height="1266" alt="">
+            <img class="f-after" src="assets/fix-after.jpg" width="585" height="1266" alt="">
+            <span class="tap" aria-hidden="true"></span>
+            <span class="pin" aria-hidden="true"><img src="assets/compose.jpg" alt=""></span>
+            <span class="sheet" aria-hidden="true"><img src="assets/compose.jpg" alt=""></span>
+            <span class="mark" aria-hidden="true"></span>
+          </div>
+          <span class="tag t1" aria-hidden="true">Before</span>
+          <span class="tag t2" aria-hidden="true">Tap to Fix</span>
+          <span class="tag t3" aria-hidden="true"><svg viewBox="0 0 16 16" width="18" height="18"><path d="M3 8.5l3.2 3L13 4.5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>Fixed</span>
+          <button class="film-pause" type="button" aria-pressed="false">Pause</button>
+        </div>
+        <ol class="film-steps">
+          <li class="s1"><h3>Spot it</h3><p>On a phone, the “Book your assessment” button stops halfway across the page.</p></li>
+          <li class="s2"><h3>Tap it and ask</h3><p>The reviewer taps the button and types: <q>Should this button be full width on mobile?</q> The pin records exactly which button.</p></li>
+          <li class="s3"><h3>It's fixed</h3><p><code>/tap-to-fix:fix</code> made the buttons full width in one pull request, and the comment showed as done on the reviewer's list.</p></li>
+        </ol>
+      </div>
+    </div>
+  </section>
+
+  <section class="band install" id="install">
+    <div class="wrap">
+      <p class="k">Install</p>
+      <h2>Set it up in a few minutes</h2>
+      <p class="intro">You need Claude Code, Node 22 and a free Cloudflare account. Everything runs on your own account.</p>
+      <ol>
+        <li><b>Install the plugins</b> in Claude Code. Tap to Fix uses <a href="https://github.com/workingBen/proofs">Proofs</a> for its review cycle.
+<pre class="cmd"><b>/plugin</b> marketplace add workingBen/proofs
+<b>/plugin</b> install proofs@proofs
+<b>/plugin</b> marketplace add workingBen/tap-to-fix
+<b>/plugin</b> install tap-to-fix@tap-to-fix</pre></li>
+        <li><b>Deploy your own service</b> with <code>/tap-to-fix:setup</code>. It creates one database, one storage bucket and one Worker on your Cloudflare account, and gives you a script tag and your owner link.</li>
+        <li><b>Add the script tag</b> to your site's pages. Visitors see nothing; only someone with a reviewer link does.</li>
+        <li><b>Add a reviewer</b> on your dashboard, assign them pages, and text them their link.</li>
+      </ol>
+      <p>The <a href="https://github.com/workingBen/tap-to-fix#quickstart">full quickstart</a> covers content security policies and every option.</p>
+    </div>
+  </section>
+
+  <section class="band data">
+    <div class="wrap">
+      <p class="k">Your data</p>
+      <h2>It stays on your account</h2>
+      <ul>
+        <li><b>No hosted service.</b> Comments, screenshots and reviewers live in your own Cloudflare database and bucket.</li>
+        <li><b>Screenshots have no public address.</b> Only you and the reviewer who took one can see it.</li>
+        <li><b>Reviewer links keep their key after the <code>#</code></b>, which browsers never send to your site's server or logs.</li>
+        <li><b>Limits on every write:</b> comment size, screenshot size, and how many comments a reviewer can save a minute and a day. <a href="https://github.com/workingBen/tap-to-fix/blob/main/SECURITY.md">SECURITY.md</a> lists them all.</li>
+      </ul>
+    </div>
+  </section>
+</main>
+
+<footer>
+  <div class="wrap">
+    <span>Tap to Fix is free and open source (MIT). Built for <a href="https://greensprings.life">Greensprings Longevity</a>.</span>
+    <span><a href="https://github.com/workingBen/tap-to-fix">GitHub</a> · <a href="https://github.com/workingBen/proofs">Proofs</a></span>
+  </div>
+</footer>
+
+<script>
+  document.querySelectorAll('.film-pause').forEach(function (b) {
+    b.addEventListener('click', function () {
+      var paused = b.closest('.film').classList.toggle('paused');
+      b.setAttribute('aria-pressed', String(paused));
+      b.textContent = paused ? 'Play' : 'Pause';
+    });
+  });
+</script>
+</body>
+</html>
