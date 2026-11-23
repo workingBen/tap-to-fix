@@ -87,6 +87,13 @@ try {
     console.log("MEASURE", name, JSON.stringify(await measure(page)));
     await page.screenshot({ path: join(out, name), fullPage: true });
 
+    if (viewport.width === 1440 || viewport.width === 390) {
+      // Ben's done pages unfolded.
+      await page.locator("[data-person] details.fold > summary").first().click();
+      await page.mouse.move(1, 1);
+      await page.screenshot({ path: join(out, name.replace(".png", "-fold.png")), fullPage: true });
+      await page.locator("[data-person] details.fold > summary").first().click();
+    }
     if (!mobile && viewport.width === 1440) {
       // The more menu open.
       await page.locator("[data-person] details.more > summary").first().click();
@@ -112,6 +119,8 @@ try {
           (window as unknown as { sms?: string }).sms = this.getAttribute("href") ?? "";
         };
       });
+      // Text link lives in the more menu.
+      await col.locator("details.more > summary").click();
       await col.getByRole("button", { name: "Text link" }).click();
       await col.locator("[data-flash]").waitFor();
       await page.mouse.move(1, 1);

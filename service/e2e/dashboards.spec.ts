@@ -176,13 +176,13 @@ test("owner adds a site, a reviewer and an assignment", async ({ page }) => {
   await expect(row(reviewerPage, "Owner page")).toBeVisible();
 });
 
-test("ready strip shows the command in the reviewer's column", async ({ page }) => {
+test("the Ready to fix strip at the top shows the reviewer's command", async ({ page }) => {
   const r = await reviewerWith("Quinn Ready", [{ path: "/other.html", title: "Ready page" }]);
   await comment(r.token, "/other.html", "Fix the spacing");
   await page.goto(OWNER_URL());
   const quinn = column(page, "Quinn Ready");
-  await expect(quinn.locator(".person-h")).toContainText("1 open · link on");
-  const strip = quinn.locator("[data-ready]", { hasText: "1 comment ready to fix on Fixture" });
+  await expect(quinn.locator(".person-h")).toContainText("link on");
+  const strip = page.locator(".readybox [data-ready]", { hasText: "Quinn · 1 open on Fixture" });
   await expect(strip).toBeVisible();
   await expect(strip.locator("code")).toHaveText("/tap-to-fix:fix quinn fixture");
   await expect(strip.getByRole("button", { name: "Copy" })).toBeVisible();
@@ -196,7 +196,7 @@ test("ready box downloads a batch file that matches the count", async ({ page })
   await comment(r.token, "/other.html", "Second");
   await page.goto(OWNER_URL());
   const dana = column(page, "Dana Download");
-  await expect(dana.locator("[data-ready]")).toContainText("2 comments ready to fix on Fixture");
+  await expect(page.locator(".readybox [data-ready]", { hasText: "Dana Download" })).toContainText("Dana Download · 2 open on Fixture");
   await dana.getByLabel("More for Dana").click();
   const btn = dana.getByRole("button", { name: "Download batch file for Fixture" });
   await expect(btn).toBeVisible();
@@ -217,10 +217,12 @@ test("reissue asks first and the old link stops working", async ({ page }) => {
 
   // Dismissing changes nothing.
   page.once("dialog", (d) => void d.dismiss());
+  await riley.getByLabel("More for Riley").click();
   await riley.getByRole("button", { name: "New link" }).click();
   await expect(page.locator("[data-flash]")).toHaveCount(0);
 
   const message = acceptNextDialog(page);
+  if (!(await riley.getByRole("button", { name: "New link" }).isVisible())) await riley.getByLabel("More for Riley").click();
   await riley.getByRole("button", { name: "New link" }).click();
   expect(await message).toBe("Make a new link for Riley? Riley's old link stops working.");
   await expect(riley.locator("[data-flash]")).toContainText("Text this link to Riley");
@@ -281,6 +283,7 @@ test("Text link opens a text message with the link in it", async ({ page }) => {
   await reviewerWith("Tess Text", [{ path: "/index.html", title: "Text page" }]);
   await page.goto(OWNER_URL());
   const tess = column(page, "Tess Text");
+  await tess.getByLabel("More for Tess").click();
   await tess.getByRole("button", { name: "Text link" }).click();
   await expect.poll(() => page.evaluate(() => (window as unknown as { smsOpened: string[] }).smsOpened.length)).toBe(1);
   const href = await page.evaluate(() => (window as unknown as { smsOpened: string[] }).smsOpened[0]);
@@ -300,23 +303,53 @@ test("a link made before links were kept shows the plain note", async ({ page })
   const olive = column(page, "Olive Old");
   await olive.getByRole("button", { name: "Copy link" }).click();
   await expect(olive.locator("[data-flash]")).toContainText(
-    "This link was made before links could be copied. Tap New link once to make one you can copy and text.",
+    "This link was made before links could be copied. Tap New link (under More) once to make one you can copy and text.",
   );
 });
 
 for (const [label, who] of [["", "Rowan Buttons"], [" @desktop", "Rowan Desktop"]]) {
-  test(`the column's link buttons sit on one row under the name, with no horizontal scroll${label}`, async ({ page }) => {
+  test(`the column header is one row: name, Copy link and More, with no horizontal scroll${label}`, async ({ page }) => {
     await reviewerWith(who, []);
     await page.goto(OWNER_URL());
     const rowan = column(page, who);
-    const ys = [];
-    for (const name of ["Copy link", "Text link", "New link"]) ys.push((await rowan.getByRole("button", { name }).boundingBox())!.y);
-    expect(new Set(ys).size).toBe(1);
-    const nameBox = (await rowan.locator(".pname").boundingBox())!;
-    expect(ys[0]).toBeGreaterThan(nameBox.y);
+    const mid = (b: { y: number; height: number }) => b.y + b.height / 2;
+    const name = (await rowan.locator(".av").boundingBox())!;
+    const copy = (await rowan.getByRole("button", { name: "Copy link" }).boundingBox())!;
+    const more = (await rowan.getByLabel(`More for ${who.split(" ")[0]}`).boundingBox())!;
+    expect(Math.abs(mid(copy) - mid(name))).toBeLessThan(3);
+    expect(Math.abs(mid(more) - mid(name))).toBeLessThan(3);
+    // Text link and New link wait in the menu.
+    await expect(rowan.getByRole("button", { name: "Text link" })).toBeHidden();
+    await rowan.getByLabel(`More for ${who.split(" ")[0]}`).click();
+    await expect(rowan.getByRole("button", { name: "Text link" })).toBeVisible();
+    await expect(rowan.getByRole("button", { name: "New link" })).toBeVisible();
     expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   });
 }
+
+test("done pages fold into N done, and the fold stays open across a re-render", async ({ page }) => {
+  const r = await reviewerWith("Fern Fold", [
+    { path: "/index.html", title: "Fold done page" },
+    { path: "/other.html", title: "Fold open page" },
+  ]);
+  const c = await comment(r.token, "/index.html", "Done one");
+  await owner("PATCH", `/comments/${c}`, { status: "done" });
+  await comment(r.token, "/other.html", "Open one");
+  await page.route("**/api/owner/reviewers/*/link", (route) =>
+    route.fulfill({ status: 409, contentType: "application/json", body: '{"error":"x","code":"not_stored"}' }),
+  );
+  await page.goto(OWNER_URL());
+  const fern = column(page, "Fern Fold");
+  await expect(fern.locator("[data-row]", { hasText: "Fold open page" })).toBeVisible();
+  await expect(fern.locator("[data-row]", { hasText: "Fold done page" })).toBeHidden();
+  await fern.locator("details.fold > summary", { hasText: "1 done" }).click();
+  await expect(fern.locator("[data-row]", { hasText: "Fold done page" })).toBeVisible();
+  await expect(fern.locator("[data-row]", { hasText: "Fold done page" })).toContainText("Done");
+  // The not-stored note re-renders the whole page; the fold stays open.
+  await fern.getByRole("button", { name: "Copy link" }).click();
+  await expect(fern.locator("[data-flash]")).toBeVisible();
+  await expect(fern.locator("[data-row]", { hasText: "Fold done page" })).toBeVisible();
+});
 
 test("remove asks with the comment count", async ({ page }) => {
   const r = await reviewerWith("Sam Remove", [{ path: "/other.html", title: "Remove me" }]);
