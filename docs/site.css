@@ -91,10 +91,10 @@ figcaption b { color: var(--ink); }
 .screen > img, .screen > span { position: absolute; }
 .screen > img { inset: 0; width: 100%; height: 100%; }
 .f-after { opacity: 0; animation: f-after 12s infinite; }
-.tap { left: 28cqw; top: 110cqw; width: 18cqw; height: 18cqw; margin: -9cqw 0 0 -9cqw; border-radius: 50%;
+.tap { left: 28cqw; top: 113.7cqw; width: 18cqw; height: 18cqw; margin: -9cqw 0 0 -9cqw; border-radius: 50%;
   background: rgba(255, 255, 255, .55); opacity: 0; animation: f-tap 12s infinite; }
-.pin { left: 23cqw; top: 103.5cqw; width: 9.5cqw; height: 9.5cqw; overflow: hidden; transform-origin: 50% 100%; opacity: 0; animation: f-pin 12s infinite; }
-.pin img { position: absolute; width: 100cqw; max-width: none; left: -23cqw; top: -60.2cqw; }
+.pin { left: 22.5cqw; top: 106.7cqw; width: 10.5cqw; height: 13cqw; overflow: hidden; transform-origin: 50% 100%; opacity: 0; animation: f-pin 12s infinite; }
+.pin img { position: absolute; width: 100cqw; max-width: none; left: -22.5cqw; top: -59.7cqw; }
 .sheet { left: 0; right: 0; bottom: 0; height: 91cqw; overflow: hidden; transform: translateY(100%); animation: f-sheet 12s infinite; }
 .sheet img { position: absolute; width: 100cqw; max-width: none; left: 0; bottom: 0; }
 @keyframes f-tap   { 0%, 14% { opacity: 0; transform: scale(.3); } 16% { opacity: 1; } 22%, 100% { opacity: 0; transform: scale(1.4); } }
