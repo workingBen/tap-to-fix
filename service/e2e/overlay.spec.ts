@@ -1129,3 +1129,101 @@ test("the ring outlines an element inside a frame where it sits on the page @des
   }).toPass();
   await expect(framed(page).locator("#ttf-cursor-style")).toHaveCount(1);
 });
+
+// A sticky site header (fixture/sticky.html): pins slide under it like the page's own content.
+async function openStickyPage(page: Page, name: string): Promise<{ id: string; token: string }> {
+  const r = await owner<{ id: string; token: string }>("POST", "/reviewers", { name });
+  await owner("POST", "/assignments", { site: "fixture", reviewer_id: r.id, path: "/sticky.html", title: "Fixture sticky" });
+  await openAsReviewer(page, "/sticky.html", r.token);
+  await expect(bar(page)).toContainText("Reviewing");
+  return r;
+}
+
+/** Whether pin n is drawn at its spot: its body shows there, not the header over it.
+ *  Read from the screen, since a draft pin takes no taps and so cannot be hit-tested.
+ *  The fixture header is only white, light gray (#ddd) and near-black text (#111); a pin body
+ *  (dark green, or the brighter draft green) has every channel in between. */
+async function pinShows(page: Page, n: number): Promise<boolean> {
+  const dot = await pins(page).filter({ hasText: String(n) }).locator(".dot").boundingBox();
+  if (!dot) return false; // re-rendered while measuring; expect.poll asks again
+  // Just inside the left of the round body, clear of the white number.
+  const rgb = (await pixelAt(page, dot.x + 5, dot.y + dot.height / 2)).slice(0, 3);
+  return rgb.every((v) => v > 40 && v < 200);
+}
+
+/** The color of one screen pixel, read back from a page screenshot. */
+async function pixelAt(page: Page, x: number, y: number): Promise<number[]> {
+  const png = await page.screenshot({ clip: { x, y, width: 1, height: 1 }, scale: "css" });
+  return page.evaluate(async (src) => {
+    const img = new Image();
+    img.src = src;
+    await img.decode();
+    const c = document.createElement("canvas");
+    c.width = c.height = 1;
+    const ctx = c.getContext("2d")!;
+    ctx.drawImage(img, 0, 0, 1, 1);
+    return Array.from(ctx.getImageData(0, 0, 1, 1).data);
+  }, `data:image/png;base64,${png.toString("base64")}`);
+}
+
+test("pins slide under a sticky header when the page scrolls, and come back out", async ({ page }) => {
+  await openStickyPage(page, "Sticky scroller");
+  const p = (await page.locator("#first").boundingBox())!;
+  await page.touchscreen.tap(p.x + 40, p.y + p.height / 2);
+  await sheet(page).locator("textarea").fill("Check this paragraph");
+  await sheet(page).getByRole("button", { name: "Save comment" }).tap();
+  await expect(bar(page)).toContainText("Saved");
+  await expect(pins(page)).toHaveCount(1);
+  await expect.poll(() => pinShows(page, 1)).toBe(true);
+
+  // Scroll until the pin's number sits behind the header: the header's white shows there, not the pin.
+  const dot = (await pins(page).first().locator(".dot").boundingBox())!;
+  const header = (await page.locator("#site-header").boundingBox())!;
+  await page.evaluate((dy) => window.scrollBy(0, dy), dot.y + dot.height / 2 - header.height / 2);
+  await expect.poll(() => pinShows(page, 1)).toBe(false);
+  const under = (await pins(page).first().locator(".dot").boundingBox())!;
+  expect(under.y + under.height / 2).toBeLessThan(header.height); // it is there, under the header
+
+  await page.evaluate(() => window.scrollTo(0, 0));
+  await expect.poll(() => pinShows(page, 1)).toBe(true);
+});
+
+test("the draft pin slides under a sticky header too", async ({ page }) => {
+  await openStickyPage(page, "Sticky draft");
+  const p = (await page.locator("#title").boundingBox())!;
+  await page.touchscreen.tap(p.x + 40, p.y + p.height / 2);
+  await expect(sheet(page)).toBeVisible();
+  await expect(pins(page)).toHaveCount(1);
+  await expect.poll(() => pinShows(page, 1)).toBe(true);
+  await page.evaluate(() => window.scrollBy(0, 60));
+  await expect.poll(() => pinShows(page, 1)).toBe(false);
+});
+
+test("a pin on the sticky header itself stays visible", async ({ page }) => {
+  await openStickyPage(page, "Sticky logo");
+  const logo = (await page.locator("#logo").boundingBox())!;
+  await page.touchscreen.tap(logo.x + 20, logo.y + logo.height / 2);
+  await sheet(page).locator("textarea").fill("Make the logo bigger");
+  await sheet(page).getByRole("button", { name: "Save comment" }).tap();
+  await expect(bar(page)).toContainText("Saved");
+  await expect.poll(() => pinShows(page, 1)).toBe(true);
+  // After a reload, too (the saved pin is placed from its selector).
+  await page.reload();
+  await expect(pins(page)).toHaveCount(1);
+  await expect.poll(() => pinShows(page, 1)).toBe(true);
+});
+
+test("the hover ring is cut off at a sticky header's bottom edge @desktop", async ({ page }) => {
+  await openStickyPage(page, "Sticky ring");
+  await page.evaluate(() => window.scrollTo(0, 80)); // the heading is now partly under the header
+  const header = (await page.locator("#site-header").boundingBox())!;
+  const title = (await page.locator("#title").boundingBox())!;
+  expect(title.y).toBeLessThan(header.height);
+  await page.mouse.move(title.x + 20, header.height + 4);
+  await expect(ring(page)).toBeVisible();
+  await expect.poll(() => ring(page).evaluate((r) => getComputedStyle(r).clipPath)).toMatch(/^inset\(/);
+  // Over the header itself: the ring is whole.
+  const logo = (await page.locator("#logo").boundingBox())!;
+  await page.mouse.move(logo.x + 20, logo.y + logo.height / 2);
+  await expect.poll(() => ring(page).evaluate((r) => getComputedStyle(r).clipPath)).toBe("none");
+});

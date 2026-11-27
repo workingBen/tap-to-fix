@@ -238,11 +238,17 @@ function pointIn(doc: Document, el: Element, c: StoredLocator): { x: number; y: 
 
 /** The pin for a stored comment, in `doc`'s page coordinates (frames included). */
 export function findPin(doc: Document, c: StoredLocator): { x: number; y: number; moved: boolean } | null {
+  const at = locatePin(doc, c);
+  return at && { x: at.x, y: at.y, moved: at.moved };
+}
+
+/** findPin, plus the element the pin is anchored to (null when it fell back to page coordinates). */
+export function locatePin(doc: Document, c: StoredLocator): { x: number; y: number; moved: boolean; el: Element | null } | null {
   const text = c.element_text === null ? null : collapse(c.element_text);
   if (c.selector) {
     const el = resolveSelector(doc, c.selector);
     if (el && (text === null || collapse(el.textContent).startsWith(text.slice(0, 40)))) {
-      return { ...pointIn(doc, el, c), moved: false };
+      return { ...pointIn(doc, el, c), moved: false, el };
     }
   }
   if (text) {
@@ -250,11 +256,11 @@ export function findPin(doc: Document, c: StoredLocator): { x: number; y: number
     for (const d of [doc, ...frameDocs(doc)]) {
       for (const el of Array.from(d.querySelectorAll("body *"))) {
         if (++n > 2000) break;
-        if (isElement(el) && collapse(el.textContent) === text) return { ...pointIn(doc, el, c), moved: false };
+        if (isElement(el) && collapse(el.textContent) === text) return { ...pointIn(doc, el, c), moved: false, el };
       }
     }
   }
-  if (c.page_x !== null && c.page_y !== null) return { x: c.page_x, y: c.page_y, moved: true };
+  if (c.page_x !== null && c.page_y !== null) return { x: c.page_x, y: c.page_y, moved: true, el: null };
   return null;
 }
 
