@@ -22,7 +22,11 @@ export type BarState =
   | { kind: "offline" };
 
 /** A pin in DOCUMENT coordinates. */
-export type PinView = { n: number; x: number; y: number; settled?: boolean; moved?: boolean; draft?: boolean };
+/** onBar: anchored to an element inside the site's own top bar, so the bar never covers it. */
+export type PinView = { n: number; x: number; y: number; settled?: boolean; moved?: boolean; draft?: boolean; onBar?: boolean };
+
+/** Far enough to never clip a pin on the sides or bottom of the zero-size pins layer. */
+const CLIP_FAR = 100_000;
 
 export type ReadView = { n: number; body: string; status: Status; note: string | null; moved: boolean };
 
@@ -82,6 +86,12 @@ export class OverlayUI {
   /** One persistent live region, so screen readers announce "Saved" when its text appears. */
   private readonly savedNote: HTMLSpanElement;
   private readonly pinsLayer: HTMLDivElement;
+  /** Pins on the site's top bar itself: same coordinates, never clipped. */
+  private readonly barPinsLayer: HTMLDivElement;
+  /** The bottom edge of the site's fixed or sticky top bar (viewport px), and the bar; null: none. */
+  private clipY: number | null = null;
+  private topBar: Element | null = null;
+  private ringAt: { top: number; onBar: boolean } | null = null;
   private readonly sheet: HTMLDivElement;
   private pins: PinView[] = [];
   private onSheetClose: (() => void) | null = null;
@@ -105,6 +115,7 @@ export class OverlayUI {
     this.savedNote = el("span", { class: "saved", role: "status", "data-ttf": "saved" });
     this.bar.append(this.savedNote);
     this.pinsLayer = el("div", { class: "pins", "data-ttf": "pins" });
+    this.barPinsLayer = el("div", { class: "pins", "data-ttf": "bar-pins" });
     this.sheet = el("div", { class: "sheet", "data-ttf": "sheet", role: "dialog", "aria-modal": "false" });
     this.sheet.hidden = true;
     // The Comment-mode cursor and the hover ring live in the shadow root, so a screenshot (which
@@ -120,7 +131,7 @@ export class OverlayUI {
     this.ring = el("div", { class: "hover-ring", "data-ttf": "ring", "aria-hidden": "true" });
     this.cursor.hidden = true;
     this.ring.hidden = true;
-    this.root = el("div", { class: "root", "data-mode": "use" }, this.pinsLayer, this.ring, this.cursor, this.bar, this.sheet);
+    this.root = el("div", { class: "root", "data-mode": "use" }, this.pinsLayer, this.barPinsLayer, this.ring, this.cursor, this.bar, this.sheet);
     shadow.append(style, this.root);
     // Keystrokes in the comment box reach the page retargeted to this host, so the page's
     // "ignore keys while typing in a field" checks miss them and its shortcuts would fire.
@@ -203,8 +214,11 @@ export class OverlayUI {
       this.ring.style.width = `${r.width + 6}px`;
       this.ring.style.height = `${r.height + 6}px`;
       this.ring.style.transform = `translate(${r.left - 3}px, ${r.top - 3}px)`;
+      this.ringAt = { top: r.top - 3, onBar: !!this.topBar?.contains(target) };
+      this.clipRing();
     } else {
       this.ring.hidden = true;
+      this.ringAt = null;
     }
     // Hide the arrow on this page and, when the mouse is over a frame, inside that frame's page.
     this.hideArrow(this.doc);
@@ -226,6 +240,34 @@ export class OverlayUI {
     this.doc.getElementById(CURSOR_STYLE_ID)?.remove();
     for (const d of this.arrowHidden) d.getElementById(CURSOR_STYLE_ID)?.remove();
     this.arrowHidden.clear();
+  }
+
+  /**
+   * The site's fixed or sticky top bar ends at `y` (viewport px): pins, the draft pin and the
+   * hover ring slide under it like the page's own content. Pins anchored on the bar itself sit in
+   * their own layer and stay visible. null: no top bar, nothing is clipped.
+   */
+  clipTop(y: number | null, bar: Element | null): void {
+    this.clipY = y;
+    this.topBar = y === null ? null : bar;
+    this.clipPins();
+    this.clipRing();
+  }
+
+  private clipPins(): void {
+    if (this.clipY === null) {
+      this.pinsLayer.style.removeProperty("clip-path");
+      return;
+    }
+    // The layer is a zero-size box at the page origin, so its own top moves as the page scrolls.
+    const t = this.clipY - this.pinsLayer.getBoundingClientRect().top;
+    this.pinsLayer.style.clipPath = `inset(${t}px -${CLIP_FAR}px -${CLIP_FAR}px -${CLIP_FAR}px)`;
+  }
+
+  private clipRing(): void {
+    const t = this.clipY === null || !this.ringAt || this.ringAt.onBar ? 0 : this.clipY - this.ringAt.top;
+    if (t > 0) this.ring.style.clipPath = `inset(${t}px 0 0 0)`;
+    else this.ring.style.removeProperty("clip-path");
   }
 
   /** Raises the pill so its bottom edge is `px` above the viewport bottom; null puts it back. */
@@ -252,7 +294,7 @@ export class OverlayUI {
     const r = this.pinsLayer.getBoundingClientRect();
     const ox = r.left + win.scrollX;
     const oy = r.top + win.scrollY;
-    const nodes = this.pins.map((p) => {
+    const nodes = this.pins.map((p): [HTMLButtonElement, boolean] => {
       const flip = p.x - win.scrollX + PIN_FLIP_MARGIN > win.innerWidth;
       const dir: Dir = flip ? -1 : 1;
       const cls = ["pin", flip ? "flip" : "", p.settled ? "settled" : "", p.moved ? "moved" : "", p.draft ? "new" : ""].filter(Boolean);
@@ -274,9 +316,10 @@ export class OverlayUI {
       b.style.top = `${p.y - oy - 49}px`;
       if (p.draft) b.tabIndex = -1;
       else b.addEventListener("click", () => this.onPinTap(p.n));
-      return b;
+      return [b, !!p.onBar];
     });
-    this.pinsLayer.replaceChildren(...nodes);
+    this.pinsLayer.replaceChildren(...nodes.filter(([, onBar]) => !onBar).map(([b]) => b));
+    this.barPinsLayer.replaceChildren(...nodes.filter(([, onBar]) => onBar).map(([b]) => b));
   }
 
   get sheetOpen(): boolean {

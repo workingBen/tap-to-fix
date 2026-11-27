@@ -2,14 +2,15 @@ import { fetchPageComments, postComment, type PageComment } from "./api";
 import {
   deepElementFromPoint,
   describeElement,
-  findPin,
   FRAME_SEP,
   frameDoc,
+  locatePin,
   locatorFor,
   toTopPoint,
   topRect,
   type Locator,
 } from "./locate";
+import { edgeBar } from "./edges";
 import { takeScreenshot } from "./shot";
 import { readMode, saveMode, type Mode } from "./mode";
 import { isSettled, OverlayUI, type PinView } from "./ui";
@@ -113,15 +114,20 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     let draft: Draft | null = null;
     let mode: Mode = readMode(win);
     let placed: (PinView & { comment: PageComment })[] = [];
+    /** The site's own fixed or sticky bar along the top edge, if any (see placeBar). */
+    let topBar: Element | null = null;
+    let draftTarget: Element | null = null;
+    const onBar = (el: Element | null) => !!topBar && !!el && topBar.contains(el);
 
     const render = () => {
       placed = [];
       comments.forEach((c, i) => {
-        const at = findPin(doc, c);
-        if (at) placed.push({ n: i + 1, x: at.x, y: at.y, moved: at.moved, settled: isSettled(c.status), comment: c });
+        const at = locatePin(doc, c);
+        if (at)
+          placed.push({ n: i + 1, x: at.x, y: at.y, moved: at.moved, settled: isSettled(c.status), onBar: onBar(at.el), comment: c });
       });
       const pins: PinView[] = [...placed];
-      if (draft) pins.push({ n: draft.n, x: draft.locator.page_x, y: draft.locator.page_y, draft: true });
+      if (draft) pins.push({ n: draft.n, x: draft.locator.page_x, y: draft.locator.page_y, draft: true, onBar: onBar(draftTarget) });
       ui.setPins(pins);
     };
     let savedUntil = 0;
@@ -159,6 +165,7 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     const tap = (target: Element, clientX: number, clientY: number) => {
       if (draft) return; // finish or cancel the open comment first
       const n = comments.length + 1;
+      draftTarget = target;
       draft = {
         n,
         locator: locatorFor(target, clientX, clientY, doc),
@@ -367,25 +374,18 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     };
     inputOn(doc);
     // Sites with a fixed or sticky bar along the bottom edge (a cookie banner): sit above it.
+    // A fixed or sticky header along the top edge: pins slide under it, as the page's content does.
     const placeBar = () => {
       if (!alive) return;
-      const x = win.innerWidth / 2;
-      const y = win.innerHeight - 4;
-      for (const hit of doc.elementsFromPoint(x, y)) {
-        if (hit === ui.host || ui.host.contains(hit)) continue;
-        for (let n: Element | null = hit; n; n = n.parentElement) {
-          const pos = win.getComputedStyle(n).position;
-          if (pos !== "fixed" && pos !== "sticky") continue;
-          const cs = win.getComputedStyle(n);
-          const r = n.getBoundingClientRect();
-          // Full-screen fixed backdrops start in the top half; they are not a bottom bar.
-          if (cs.visibility !== "hidden" && cs.opacity !== "0" && r.width > 0 && r.height > 0 && r.top > win.innerHeight * 0.5) {
-            ui.liftBar(win.innerHeight - r.top + 12);
-            return;
-          }
-        }
+      const bottom = edgeBar(doc, win, ui.host, "bottom");
+      ui.liftBar(bottom ? win.innerHeight - bottom.rect.top + 12 : null);
+      const top = edgeBar(doc, win, ui.host, "top");
+      const bar = top?.el ?? null;
+      if (bar !== topBar) {
+        topBar = bar;
+        render(); // a pin on the bar itself moves to the layer the bar never covers
       }
-      ui.liftBar(null);
+      ui.clipTop(top ? top.rect.bottom : null, bar);
     };
     let liftQueued = false;
     const scheduleLift = () => {
@@ -411,6 +411,8 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       });
     };
     listen(win, "resize", schedule);
+    // The pins layer moves with the page, and a sticky header can stick or unstick: re-clip.
+    listen(win, "scroll", scheduleLift, { capture: true, passive: true });
     if (doc.readyState !== "complete") listen(win, "load", schedule, { once: true });
     doc.fonts?.ready.then(schedule, () => {});
     if (typeof ResizeObserver !== "undefined") {
