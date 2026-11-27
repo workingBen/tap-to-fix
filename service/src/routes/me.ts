@@ -45,6 +45,7 @@ type AssignmentRow = {
   path: string;
   title: string;
   last_opened_at: string | null;
+  finished_at: string | null;
   site_slug: string;
   site_name: string;
   site_origin: string;
@@ -53,7 +54,7 @@ type AssignmentRow = {
 me.get("/", async (c) => {
   const reviewer = c.get("reviewer");
   const { results: assignments } = await c.env.DB.prepare(
-    `SELECT a.id, a.path, a.title, a.last_opened_at,
+    `SELECT a.id, a.path, a.title, a.last_opened_at, a.finished_at,
             s.slug AS site_slug, s.name AS site_name, s.origin AS site_origin
        FROM assignments a JOIN sites s ON s.slug = a.site_slug
       WHERE a.reviewer_id = ?
@@ -69,6 +70,11 @@ me.get("/", async (c) => {
     .bind(reviewer.id)
     .all<{ assignment_id: string; status: Status; status_changed_at: string | null }>();
 
+  const ack = await c.env.DB.prepare("SELECT acknowledged_at FROM reviewers WHERE id = ?")
+    .bind(reviewer.id)
+    .first<{ acknowledged_at: string | null }>();
+  const acknowledgedAt = ack?.acknowledged_at ?? null;
+
   const byAssignment = new Map<string, typeof comments>();
   for (const cm of comments) {
     const list = byAssignment.get(cm.assignment_id) ?? [];
@@ -76,32 +82,50 @@ me.get("/", async (c) => {
     byAssignment.set(cm.assignment_id, list);
   }
 
+  const rows = assignments.map((a) => {
+    const list = byAssignment.get(a.id) ?? [];
+    const statuses = list.map((cm) => cm.status);
+    return {
+      id: a.id,
+      site: { slug: a.site_slug, name: a.site_name, origin: a.site_origin },
+      path: a.path,
+      title: a.title,
+      url: a.site_origin + a.path + "#ttf=" + reviewer.token,
+      status: assignmentStatus(statuses),
+      progress: progress(statuses),
+      counts: {
+        total: statuses.length,
+        settled: statuses.filter(isSettled).length,
+        in_progress: statuses.filter((s) => s === "in_progress").length,
+        open: statuses.filter((s) => s === "open").length,
+      },
+      is_new: a.last_opened_at === null,
+      is_updated: isUpdated(
+        a.last_opened_at,
+        list.flatMap((cm) => (cm.status_changed_at ? [cm.status_changed_at] : [])),
+      ),
+      finished: a.finished_at !== null,
+      finished_at: a.finished_at,
+    };
+  });
+  // "Since you last looked": comments settled after the reviewer's last Got it, page by page.
+  // `through` is the latest change counted, which Got it sends back, so a comment fixed while the
+  // notice was on screen still shows next time.
+  let through: string | null = null;
+  const fixedPages: { id: string; title: string; fixed: number; finished: boolean }[] = [];
+  for (const a of assignments) {
+    const fixed = (byAssignment.get(a.id) ?? []).filter(
+      (cm) => isSettled(cm.status) && cm.status_changed_at !== null && (acknowledgedAt === null || cm.status_changed_at > acknowledgedAt),
+    );
+    if (fixed.length === 0) continue;
+    fixedPages.push({ id: a.id, title: a.title, fixed: fixed.length, finished: a.finished_at !== null });
+    for (const cm of fixed) if (through === null || cm.status_changed_at! > through) through = cm.status_changed_at;
+  }
+
   return c.json({
     name: reviewer.name,
-    assignments: assignments.map((a) => {
-      const list = byAssignment.get(a.id) ?? [];
-      const statuses = list.map((cm) => cm.status);
-      return {
-        id: a.id,
-        site: { slug: a.site_slug, name: a.site_name, origin: a.site_origin },
-        path: a.path,
-        title: a.title,
-        url: a.site_origin + a.path + "#ttf=" + reviewer.token,
-        status: assignmentStatus(statuses),
-        progress: progress(statuses),
-        counts: {
-          total: statuses.length,
-          settled: statuses.filter(isSettled).length,
-          in_progress: statuses.filter((s) => s === "in_progress").length,
-          open: statuses.filter((s) => s === "open").length,
-        },
-        is_new: a.last_opened_at === null,
-        is_updated: isUpdated(
-          a.last_opened_at,
-          list.flatMap((cm) => (cm.status_changed_at ? [cm.status_changed_at] : [])),
-        ),
-      };
-    }),
+    assignments: rows,
+    fixed: { through, pages: fixedPages },
   });
 });
 
@@ -112,6 +136,54 @@ me.post("/assignments/:id/opened", async (c) => {
     .bind(new Date().toISOString(), c.req.param("id"), c.get("reviewer").id)
     .run();
   if (!result.meta.changes) return c.json({ error: "Not found" }, 404);
+  return c.body(null, 204);
+});
+
+/** "Review complete" on the list: the page moves to Finished. */
+me.post("/assignments/:id/finished", async (c) => {
+  const result = await c.env.DB.prepare(
+    "UPDATE assignments SET finished_at = COALESCE(finished_at, ?) WHERE id = ? AND reviewer_id = ?",
+  )
+    .bind(new Date().toISOString(), c.req.param("id"), c.get("reviewer").id)
+    .run();
+  if (!result.meta.changes) return c.json({ error: "Not found" }, 404);
+  return c.body(null, 204);
+});
+
+/** "Re-review": the page comes back out of Finished. */
+me.delete("/assignments/:id/finished", async (c) => {
+  const result = await c.env.DB.prepare("UPDATE assignments SET finished_at = NULL WHERE id = ? AND reviewer_id = ?")
+    .bind(c.req.param("id"), c.get("reviewer").id)
+    .run();
+  if (!result.meta.changes) return c.json({ error: "Not found" }, 404);
+  return c.body(null, 204);
+});
+
+const ISO_TIME = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,6})?Z$/;
+
+/**
+ * "Got it" on the notice. Body `{ through }`: the `fixed.through` time the notice was built from,
+ * so anything fixed after it still shows next time. Without one, now. Never moves backward.
+ */
+me.post("/acknowledge", async (c) => {
+  let through: unknown;
+  try {
+    const text = await c.req.text();
+    through = text ? (JSON.parse(text) as { through?: unknown } | null)?.through : undefined;
+  } catch {
+    return c.json({ error: "Invalid data" }, 400);
+  }
+  const now = new Date().toISOString();
+  if (through !== undefined && through !== null && (typeof through !== "string" || !ISO_TIME.test(through))) {
+    return c.json({ error: "Invalid time" }, 400);
+  }
+  const at = typeof through === "string" && through < now ? through : now;
+  await c.env.DB.prepare(
+    `UPDATE reviewers SET acknowledged_at = ?
+      WHERE id = ? AND (acknowledged_at IS NULL OR acknowledged_at < ?)`,
+  )
+    .bind(at, c.get("reviewer").id, at)
+    .run();
   return c.body(null, 204);
 });
 
