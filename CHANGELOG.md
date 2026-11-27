@@ -14,6 +14,8 @@ All notable changes to tap-to-fix are listed here. The format follows
   `npm run deploy` makes the image URL absolute using the saved service URL.
 - The owner dashboard has a **Review** link next to **Page** on every assigned page. It opens that page with
   the Tap to Fix layer on, as that reviewer. It is grayed out while the reviewer's link is off.
+- The dashboards have a real icon in the browser tab and on a phone's home screen (the green pin with a
+  check) instead of a blank tile with a letter. The project site has the same icons.
 
 ### Changed
 

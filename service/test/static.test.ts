@@ -45,6 +45,26 @@ describe("client build", () => {
     execFileSync("node", ["scripts/build-client.mjs"], { stdio: "ignore" });
   }, 60_000);
 
+  it("gives both dashboards a tab icon, a home-screen icon and a manifest", () => {
+    for (const page of ["public/r/index.html", "public/o/index.html"]) {
+      const html = readFileSync(page, "utf8");
+      expect(html, page).toContain('<link rel="icon" href="/icons/favicon.svg" type="image/svg+xml">');
+      expect(html, page).toContain('<link rel="icon" href="/icons/favicon-32.png" type="image/png" sizes="32x32">');
+      expect(html, page).toContain('<link rel="apple-touch-icon" href="/icons/apple-touch-icon.png">');
+      expect(html, page).toContain('<link rel="manifest" href="/icons/manifest.webmanifest">');
+      expect(html, page).toContain('<meta name="apple-mobile-web-app-title" content="Tap to Fix">');
+      expect(html, page).toContain('<meta name="theme-color" content="#2F6B4F">');
+    }
+    for (const f of ["favicon.svg", "favicon-32.png", "apple-touch-icon.png", "icon-192.png", "icon-512.png"])
+      expect(existsSync(`public/icons/${f}`), f).toBe(true);
+    const manifest = JSON.parse(readFileSync("public/icons/manifest.webmanifest", "utf8"));
+    expect(manifest.name).toBe("Tap to Fix");
+    expect(manifest.icons.map((i: { sizes: string }) => i.sizes)).toEqual(expect.arrayContaining(["192x192", "512x512"]));
+    // The reviewer's token rides in the URL fragment; a start_url would drop it and launch signed out.
+    expect(manifest).not.toHaveProperty("start_url");
+    expect(readFileSync("public/_headers", "utf8")).toContain("/icons/*\n  Cache-Control: public, max-age=86400");
+  });
+
   it("keeps the loader at or under 1500 bytes", () => {
     expect(statSync("public/t.js").size).toBeLessThanOrEqual(1500);
   });
