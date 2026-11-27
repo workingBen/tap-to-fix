@@ -13,19 +13,25 @@ import {
 import { edgeBar } from "./edges";
 import { takeScreenshot } from "./shot";
 import { readMode, saveMode, type Mode } from "./mode";
-import { isSettled, OverlayUI, type PinView } from "./ui";
+import { isSettled, OverlayUI, type LineState, type PinView } from "./ui";
+import { asComment, newClientId, offlineStore, Outbox, type OfflineStore, type Queued, type QueuedData } from "./outbox";
+import { encodeWaiting } from "../handoff";
 
 /** How long Save waits for the screenshot before sending the comment without it. */
 const SHOT_WAIT_MS = 12_000;
 const SAVED_NOTICE_MS = 3_000;
 const SAVE_FAILED = "Couldn't save. Check your connection and try again.";
-/** Refusals that no retry will fix get their own words (the text is still kept). */
+/** Refusals get their own words (the text is still kept). 401, 403 and 413 are ones no retry will fix. */
 const SAVE_REFUSED: Record<number, string> = {
   401: "This link no longer works. Ask for a new one.",
   403: "This page isn't on your review list.",
   413: "This comment is too long to save. Shorten it and try again.",
   429: "That's a lot of comments at once. Wait a minute and try again.",
 };
+/** A refusal with no words of its own (a 400, say): offline mode still keeps the text. */
+const SEND_REFUSED = "The review service didn't accept this comment.";
+/** How long "All 3 sent" stays, the same as "Saved". */
+const SENT_NOTICE_MS = 3_000;
 /** A tap: the finger lifts within this distance and time of where it went down. */
 const TAP_SLOP_PX = 10;
 const TAP_MS = 600;
@@ -84,6 +90,9 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
   for (const old of doc.querySelectorAll("tap-to-fix-overlay")) old.remove();
   const ui = new OverlayUI(doc, config.dashboardUrl);
   const path = win.location.pathname;
+  const store = offlineStore(win);
+  // Pins for a page opened (or restored) offline come from the last list this page loaded.
+  const listKey = `${config.site}\n${path}`;
   const cleanup: (() => void)[] = [() => ui.host.remove()];
   let alive = true;
   const listen = (target: EventTarget, type: string, fn: (e: never) => void, opts?: AddEventListenerOptions) => {
@@ -99,46 +108,152 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     },
   };
   ui.setBar({ kind: "loading" });
-  void fetchPageComments(config, path).then((result) => {
+  void fetchPageComments(config, path).then(async (result) => {
     if (!alive) return; // the site moved on while this was loading
-    if (result.kind !== "ok") {
-      // Not assigned, signed out or offline: say so, and let every tap through to the page.
+    if (result.kind === "ok") {
+      void store.writeList(listKey, { token: config.token, comments: result.comments }).catch(() => {});
+      review(result.comments, true);
+      return;
+    }
+    if (result.kind === "not_assigned") void store.writeList(listKey, { token: config.token, not_assigned: true }).catch(() => {});
+    if (result.kind !== "offline") {
+      // Not assigned or signed out: say so, and let every tap through to the page.
       ui.setBar(result);
       return;
     }
-    review(result.comments);
+    // Offline (or the service failed): carry on from what this phone kept. A page that never
+    // loaded its comments here starts empty; new comments still save, and earlier ones show
+    // once the service answers.
+    const cached = await store.readList(listKey).catch(() => null);
+    if (!alive) return;
+    if (cached && cached.token === config.token && "not_assigned" in cached) {
+      ui.setBar({ kind: "not_assigned" });
+      return;
+    }
+    review(cached && cached.token === config.token && "comments" in cached ? cached.comments : [], false);
   });
   return self;
 
-  function review(comments: PageComment[]): void {
+  /** fresh: the comments came from the service just now (not from the phone's copy). */
+  function review(comments: PageComment[], fresh: boolean): void {
     let draft: Draft | null = null;
     let mode: Mode = readMode(win);
-    let placed: (PinView & { comment: PageComment })[] = [];
+    let placed: (PinView & { comment: PageComment; queued: Queued | null })[] = [];
     /** The site's own fixed or sticky bar along the top edge, if any (see placeBar). */
     let topBar: Element | null = null;
     let draftTarget: Element | null = null;
     const onBar = (el: Element | null) => !!topBar && !!el && topBar.contains(el);
 
+    let outbox: Outbox; // set below; render only runs once it is
+    /** The comment being saved from the open sheet: its draft pin shows, not a second one. */
+    let holding: string | null = null;
+    /** Saved comments and this page's unsent ones, in the order they were made: pin numbers. */
+    const entries = (): { comment: PageComment; queued: Queued | null }[] => {
+      const local = outbox.view().waiting.filter((q) => q.path === path && q.client_id !== holding);
+      return [...comments.map((c) => ({ comment: c, queued: null })), ...local.map((q) => ({ comment: asComment(q), queued: q }))].sort(
+        (a, b) => (a.comment.created_at < b.comment.created_at ? -1 : a.comment.created_at > b.comment.created_at ? 1 : 0),
+      );
+    };
     const render = () => {
       placed = [];
-      comments.forEach((c, i) => {
+      entries().forEach(({ comment: c, queued }, i) => {
         const at = locatePin(doc, c);
         if (at)
-          placed.push({ n: i + 1, x: at.x, y: at.y, moved: at.moved, settled: isSettled(c.status), onBar: onBar(at.el), comment: c });
+          placed.push({
+            n: i + 1,
+            x: at.x,
+            y: at.y,
+            moved: at.moved,
+            settled: isSettled(c.status),
+            onBar: onBar(at.el),
+            unsent: !!queued,
+            comment: c,
+            queued,
+          });
       });
       const pins: PinView[] = [...placed];
       if (draft) pins.push({ n: draft.n, x: draft.locator.page_x, y: draft.locator.page_y, draft: true, onBar: onBar(draftTarget) });
       ui.setPins(pins);
     };
     let savedUntil = 0;
+    let savedKind: "sent" | "phone" = "sent";
     let savedTimer: ReturnType<typeof setTimeout> | undefined;
-    cleanup.push(() => clearTimeout(savedTimer));
-    const updateBar = () => ui.setBar({ kind: "reviewing", count: comments.length, saved: Date.now() < savedUntil });
-    const flashSaved = () => {
+    let sentUntil = 0;
+    let sentTotal = 0;
+    let sentTimer: ReturnType<typeof setTimeout> | undefined;
+    cleanup.push(() => clearTimeout(savedTimer), () => clearTimeout(sentTimer));
+    const line = (): LineState | null => {
+      const v = outbox.view();
+      if (v.sending) return { kind: "sending", ...v.sending };
+      if (Date.now() < sentUntil) return { kind: "sent", total: sentTotal };
+      if (v.failed.length) return { kind: "failed", count: v.failed.length };
+      if (v.offline) return { kind: "offline", waiting: v.waiting.length };
+      if (v.waiting.length) return { kind: "waiting", waiting: v.waiting.length };
+      return null;
+    };
+    const updateBar = () => {
+      if (!alive) return;
+      const saved = Date.now() < savedUntil ? savedKind : null;
+      ui.setBar({ kind: "reviewing", count: entries().length, saved, line: line() });
+      // Done tells the dashboard what is still waiting here (it can't read this site's storage).
+      ui.setDashboardHref(config.dashboardUrl + "&" + encodeWaiting(config.site, outbox.waitingByPath()));
+    };
+    const flashSaved = (kind: "sent" | "phone") => {
+      savedKind = kind;
       savedUntil = Date.now() + SAVED_NOTICE_MS;
       clearTimeout(savedTimer);
       savedTimer = setTimeout(updateBar, SAVED_NOTICE_MS);
       updateBar();
+    };
+    /** The list came from the phone's copy; fetch the real one once the service answers. */
+    let stale = !fresh;
+    /** Keeps the phone's copy of this page's list current, for the next time it opens offline. */
+    const keepList = () => void store.writeList(listKey, { token: config.token, comments }).catch(() => {});
+    /** A sent comment joins the saved ones, so its pin fills in where it was. */
+    const landed = (q: Queued, id: string) => {
+      if (q.path !== path || comments.some((c) => c.id === id)) return;
+      comments.push({ ...asComment(q), id });
+      keepList();
+    };
+    outbox = new Outbox({
+      store,
+      token: config.token,
+      site: config.site,
+      send: (q) => postComment({ ...config, token: q.token }, q.data, q.shot),
+      online: () => win.navigator.onLine !== false,
+      onChange: () => {
+        if (!alive) return;
+        render();
+        updateBar();
+      },
+      onSent: landed,
+      onAllSent: (total) => {
+        sentTotal = total;
+        sentUntil = Date.now() + SENT_NOTICE_MS;
+        clearTimeout(sentTimer);
+        sentTimer = setTimeout(updateBar, SENT_NOTICE_MS);
+        if (stale) void refreshList();
+      },
+    });
+    cleanup.push(() => outbox.stop());
+    if (!fresh) outbox.noteReached(false); // the list didn't load: the line says offline until something does
+    const refreshList = async () => {
+      const result = await fetchPageComments(config, path);
+      if (!alive) return;
+      outbox.noteReached(result.kind !== "offline");
+      if (result.kind !== "ok") return;
+      stale = false;
+      comments = result.comments;
+      keepList();
+      await outbox.reconcile(new Set(comments.flatMap((c) => (c.client_id ? [c.client_id] : []))));
+      render();
+      updateBar();
+    };
+    /** Back online, or back on this tab: send what is waiting, and catch up on the list. */
+    const wake = () => {
+      if (!alive) return;
+      if (stale) void refreshList().then(() => outbox.flush());
+      else void outbox.flush();
     };
 
     ui.setMode(mode);
@@ -149,11 +264,59 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       down = null;
     };
 
+    const reasonFor = (q: Queued): string | null => (q.refused === undefined ? null : (SAVE_REFUSED[q.refused] ?? SEND_REFUSED));
     ui.onPinTap = (n) => {
       if (draft) return; // never throw away text being typed
       const p = placed.find((x) => x.n === n);
       if (!p) return;
-      ui.openRead({ n, body: p.comment.body, status: p.comment.status, note: p.comment.note, moved: !!p.moved });
+      ui.openRead({
+        n,
+        body: p.comment.body,
+        status: p.comment.status,
+        note: p.comment.note,
+        moved: !!p.moved,
+        unsent: p.queued ? { reason: reasonFor(p.queued) } : undefined,
+      });
+    };
+
+    const copyText = async (text: string): Promise<boolean> => {
+      try {
+        await win.navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        // No clipboard API (or not allowed): the old select-and-copy way.
+        const t = doc.createElement("textarea");
+        t.value = text;
+        t.setAttribute("readonly", "");
+        t.style.cssText = "position:fixed;left:-9999px;top:0;opacity:0";
+        doc.body.append(t);
+        t.select();
+        let ok = false;
+        try {
+          ok = doc.execCommand("copy");
+        } catch {
+          ok = false;
+        }
+        t.remove();
+        return ok;
+      }
+    };
+    ui.onLineTap = (state) => {
+      if (draft) return;
+      if (state.kind === "offline") ui.openOffline();
+      else if (state.kind === "failed")
+        ui.openFailed(
+          outbox.view().failed.map((q) => ({ id: q.client_id, body: q.data.body, reason: reasonFor(q) })),
+          {
+            onRetry: () => void outbox.retryNow(),
+            onCopy: (id) => {
+              const q = outbox.view().waiting.find((x) => x.client_id === id);
+              return q ? copyText(q.data.body) : Promise.resolve(false);
+            },
+            onRemove: (id) => void outbox.drop(id),
+          },
+        );
+      else if (state.kind === "waiting") void outbox.retryNow();
     };
 
     const cancelDraft = () => {
@@ -164,7 +327,7 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     /** Marks a spot: a pin, a screenshot under way, and the compose sheet. */
     const tap = (target: Element, clientX: number, clientY: number) => {
       if (draft) return; // finish or cancel the open comment first
-      const n = comments.length + 1;
+      const n = entries().length + 1;
       draftTarget = target;
       draft = {
         n,
@@ -192,40 +355,41 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
           let failure = SAVE_FAILED;
           try {
             const shot = await shotWithin(mine.shot, SHOT_WAIT_MS);
-            const result = await postComment(
-              config,
-              {
-                site: config.site,
-                path,
-                body,
-                ...mine.locator,
-                viewport_w: mine.viewport_w,
-                viewport_h: mine.viewport_h,
-                device: mine.device,
-              },
-              shot,
-            );
-            if (!result.ok) {
-              failure = (result.status && SAVE_REFUSED[result.status]) || SAVE_FAILED;
+            const client_id = newClientId();
+            const data: QueuedData = {
+              site: config.site,
+              path,
+              body,
+              client_id,
+              ...mine.locator,
+              viewport_w: mine.viewport_w,
+              viewport_h: mine.viewport_h,
+              device: mine.device,
+            };
+            // On the phone first, then sent: a comment is never only in the open sheet.
+            const item: Queued = { client_id, token: config.token, site: config.site, path, data, shot, created_at: new Date().toISOString() };
+            holding = client_id; // the draft pin stands for it until the sheet closes
+            await outbox.add(item);
+            const { outcome, status } = await outbox.sendOne(item);
+            if (outcome === "refused" || outcome === "later") {
+              // The service answered, and said no: say why in the sheet, which still holds the
+              // text, and take it back off the phone (the sheet is where it lives now).
+              failure = (status && SAVE_REFUSED[status]) || SAVE_FAILED;
+              await outbox.drop(client_id);
               return;
             }
             saved = true;
-            comments.push({
-              id: result.id,
-              body,
-              status: "open",
-              note: null,
-              pr_url: null,
-              ...mine.locator,
-              created_at: new Date().toISOString(),
-            });
             draft = null;
+            holding = null;
             ui.closeSheet(false);
             render();
-            flashSaved();
+            // Sent: today's "Saved". No answer (offline): it waits on the phone, hollow.
+            flashSaved(outcome === "sent" ? "sent" : "phone");
+            if (outcome === "sent") void outbox.flush(); // the service is reachable: send any others
           } finally {
             saving = false;
             if (!saved) {
+              holding = null;
               // Never lose a comment: the sheet stays open with the text, ready to try again.
               sheet.setSaving(false);
               sheet.setError(failure);
@@ -352,6 +516,18 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
 
     updateBar();
     render();
+    // What earlier visits left on this phone shows (hollow) and starts sending right away.
+    void outbox.load().then(() => {
+      if (!alive) return;
+      if (fresh) void outbox.reconcile(new Set(comments.flatMap((c) => (c.client_id ? [c.client_id] : []))));
+      void outbox.flush();
+    });
+    listen(win, "online", wake);
+    listen(win, "pageshow", wake); // back from the back/forward cache
+    listen(win, "offline", updateBar); // only a hint, but airplane mode says so at once
+    listen(doc, "visibilitychange", () => {
+      if (doc.visibilityState === "visible") wake();
+    });
     const capture = { capture: true };
     const onScroll = () => {
       if (!moveAt) return;

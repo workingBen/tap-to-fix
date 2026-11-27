@@ -156,6 +156,79 @@ describe("POST /api/me/comments", () => {
   });
 });
 
+describe("POST /api/me/comments with a client id (offline mode's retries)", () => {
+  const cid = "6f1c2a9e-3b4d-4e5f-8a7b-9c0d1e2f3a4b";
+  const count = async (env: Env) => (await env.DB.prepare("SELECT COUNT(*) AS n FROM comments").first<{ n: number }>())!.n;
+  /** The screenshot keys still stored, tracked through put and delete (the memory R2 has no list). */
+  const trackShots = (env: Env) => {
+    const kept = new Set<string>();
+    const put = env.SHOTS.put.bind(env.SHOTS);
+    const del = env.SHOTS.delete.bind(env.SHOTS);
+    env.SHOTS.put = (async (key: string, ...rest: unknown[]) => {
+      kept.add(key);
+      return (put as (...a: unknown[]) => unknown)(key, ...rest);
+    }) as typeof env.SHOTS.put;
+    env.SHOTS.delete = (async (key: string | string[]) => {
+      for (const k of Array.isArray(key) ? key : [key]) kept.delete(k);
+      return del(key);
+    }) as typeof env.SHOTS.delete;
+    return kept;
+  };
+
+  it("stores the same comment once and answers a repeat with the original id", async () => {
+    const { env, a } = await setup();
+    const shots = trackShots(env);
+    const first = await post(env, a.token, form({ ...base, client_id: cid }, { bytes: png, type: "image/png" }));
+    expect(first.status).toBe(201);
+    const { id } = await json(first);
+    const again = await post(env, a.token, form({ ...base, client_id: cid }, { bytes: png, type: "image/png" }));
+    expect(again.status).toBe(200);
+    expect(await json(again)).toEqual({ id, duplicate: true });
+    expect(await count(env)).toBe(1);
+    // The repeat's screenshot is never stored next to the original's.
+    expect([...shots]).toEqual([`shots/greensprings/${id}.png`]);
+    const row = await env.DB.prepare("SELECT client_id FROM comments WHERE id = ?").bind(id).first<{ client_id: string }>();
+    expect(row!.client_id).toBe(cid);
+  });
+
+  it("lists the client id with the page's comments", async () => {
+    const { env, a } = await setup();
+    await post(env, a.token, form({ ...base, client_id: cid }));
+    const out = await json(await reviewerFetch(env, a.token, "/api/me/pages/comments?site=greensprings&path=/one"));
+    expect(out.comments[0].client_id).toBe(cid);
+  });
+
+  it("two requests racing with the same id still store one comment", async () => {
+    const { env, a } = await setup();
+    const shots = trackShots(env);
+    const [r1, r2] = await Promise.all([
+      post(env, a.token, form({ ...base, client_id: cid }, { bytes: png, type: "image/png" })),
+      post(env, a.token, form({ ...base, client_id: cid }, { bytes: png, type: "image/png" })),
+    ]);
+    const ids = [(await json(r1)).id, (await json(r2)).id];
+    expect(ids[0]).toBe(ids[1]);
+    expect(await count(env)).toBe(1);
+    expect([...shots]).toEqual([`shots/greensprings/${ids[0]}.png`]);
+  });
+
+  it("another reviewer's comment with the same id is a different comment", async () => {
+    const { env, a, b } = await setup();
+    const one = await json(await post(env, a.token, form({ ...base, client_id: cid })));
+    const two = await post(env, b.token, form({ ...base, client_id: cid }));
+    expect(two.status).toBe(201);
+    expect((await json(two)).id).not.toBe(one.id);
+    expect(await count(env)).toBe(2);
+  });
+
+  it("comments without a client id are never matched to each other", async () => {
+    const { env, a } = await setup();
+    expect((await post(env, a.token, form(base))).status).toBe(201);
+    expect((await post(env, a.token, form(base))).status).toBe(201);
+    expect((await post(env, a.token, form({ ...base, client_id: "no spaces allowed" }))).status).toBe(201);
+    expect(await count(env)).toBe(3);
+  });
+});
+
 describe("CORS preflight", () => {
   it("answers OPTIONS for a registered origin with Authorization allowed", async () => {
     const { env } = await setup();

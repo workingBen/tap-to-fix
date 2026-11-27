@@ -128,7 +128,7 @@ me.get("/pages/comments", async (c) => {
   if (!assignment) return c.json({ error: "Not found" }, 404);
   const { results } = await c.env.DB.prepare(
     `SELECT id, body, status, note, pr_url, selector, element_text, element_x, element_y,
-            page_x, page_y, created_at
+            page_x, page_y, created_at, client_id
        FROM comments WHERE assignment_id = ? ORDER BY created_at, id`,
   )
     .bind(assignment.id)
@@ -149,12 +149,15 @@ type CommentInput = {
   viewport_w?: unknown;
   viewport_h?: unknown;
   device?: unknown;
+  client_id?: unknown;
 };
 
 const str = (v: unknown) => (typeof v === "string" ? v : null);
 const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
 /** A location field, or null when it is missing or longer than the cap. */
 const field = (v: unknown) => (typeof v === "string" && v.length <= MAX_FIELD_CHARS ? v : null);
+/** The comment layer's own id for a comment (a UUID); anything else is ignored. */
+const clientId = (v: unknown) => (typeof v === "string" && /^[A-Za-z0-9-]{8,64}$/.test(v) ? v : null);
 
 const MINUTE_MS = 60_000;
 const DAY_MS = 24 * 60 * MINUTE_MS;
@@ -219,6 +222,18 @@ me.post("/comments", rateLimit, commentBodyLimit, async (c) => {
   // Browsers always send Origin on a cross-site POST; a request without one is not from the site.
   if (origin !== row.origin) return c.json({ error: "Wrong origin" }, 403);
 
+  // Offline mode retries a comment until it hears back, so the same comment can arrive twice
+  // (a reply lost on a weak connection, or two tabs sending it). The first one counts.
+  const cid = clientId(input.client_id);
+  const existing = async () =>
+    cid
+      ? await c.env.DB.prepare("SELECT id FROM comments WHERE assignment_id = ? AND client_id = ?")
+          .bind(row.id, cid)
+          .first<{ id: string }>()
+      : null;
+  const before = await existing();
+  if (before) return c.json({ id: before.id, duplicate: true }, 200);
+
   const id = newId();
   const now = new Date().toISOString();
 
@@ -242,18 +257,26 @@ me.post("/comments", rateLimit, commentBodyLimit, async (c) => {
     }
   }
 
-  await c.env.DB.prepare(
+  const inserted = await c.env.DB.prepare(
     `INSERT INTO comments (id, assignment_id, body, status, selector, element_text, element_x, element_y,
-                           page_x, page_y, viewport_w, viewport_h, device, screenshot_key, created_at)
-     VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                           page_x, page_y, viewport_w, viewport_h, device, screenshot_key, created_at, client_id)
+     VALUES (?, ?, ?, 'open', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+     ON CONFLICT (assignment_id, client_id) DO NOTHING`,
   )
     .bind(
       id, row.id, body,
       field(input.selector), field(input.element_text), num(input.element_x), num(input.element_y),
       num(input.page_x), num(input.page_y), num(input.viewport_w), num(input.viewport_h),
-      field(input.device), key, now,
+      field(input.device), key, now, cid,
     )
     .run();
+  if (!inserted.meta.changes) {
+    // The same comment landed from another request while this one was uploading its screenshot.
+    if (key) await c.env.SHOTS.delete(key).catch(() => {});
+    const first = await existing();
+    if (first) return c.json({ id: first.id, duplicate: true }, 200);
+    return c.json({ error: "Could not save" }, 500);
+  }
   return c.json({ id, screenshot }, 201);
 });
 

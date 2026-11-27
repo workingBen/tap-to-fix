@@ -16,12 +16,15 @@ export type PageComment = {
   page_x: number | null;
   page_y: number | null;
   created_at: string;
+  /** The id the comment layer gave it on the phone (offline mode); null for older comments. */
+  client_id?: string | null;
 };
 
 export type PageCommentsResult =
   | { kind: "ok"; assignment_id: string; comments: PageComment[] }
   | { kind: "not_assigned" }
   | { kind: "signed_out" }
+  /** No answer, or the service failed: offline mode carries on from what the phone kept. */
   | { kind: "offline" };
 
 const auth = (cfg: OverlayConfig) => ({ Authorization: `Bearer ${cfg.token}` });

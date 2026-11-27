@@ -863,7 +863,7 @@ test("screenshot failure still saves the comment", async ({ page }) => {
   expect(c.has_screenshot).toBe(false);
 });
 
-test("network failure keeps the text", async ({ page }) => {
+test("a save with no network keeps the comment on the phone and sends it when it can", async ({ page }) => {
   const r = await freshReviewer("Offline saver");
   await openAsReviewer(page, "/index.html", r.token);
   await expect(bar(page)).toContainText("Reviewing");
@@ -880,23 +880,17 @@ test("network failure keeps the text", async ({ page }) => {
   await expect(save).toHaveText("Saving…");
   await expect(save).toBeDisabled();
   await expect(sheet(page).getByRole("button", { name: "Cancel" })).toBeDisabled();
-  const warning = sheet(page).locator("[data-ttf=save-error]");
-  await expect(warning).toHaveText("Couldn't save. Check your connection and try again.");
-  const colors = await warning.evaluate((el) => {
-    const s = getComputedStyle(el);
-    return { color: s.color, bg: s.backgroundColor };
-  });
-  expect(colors).toEqual({ color: "rgb(154, 91, 19)", bg: "rgb(251, 239, 217)" }); // --warn on --warn-bg
-  await expect(sheet(page)).toBeVisible();
-  await expect(box).toHaveValue("Do not lose me");
-  await expect(save).toBeEnabled();
-  await expect(save).toHaveText("Save comment");
-  await expect(bar(page)).toContainText("0 comments");
-
-  await page.unroute("**/api/me/comments");
-  await save.tap();
-  await expect(bar(page)).toContainText("1 comment");
+  // No answer at all: it waits on the phone (offline mode) instead of failing in the sheet.
   await expect(sheet(page)).toBeHidden();
+  await expect(bar(page).locator("[data-ttf=saved]")).toHaveText("Saved on this phone");
+  await expect(pins(page)).toHaveCount(1);
+  await expect(pins(page).first()).toHaveClass(/unsent/);
+  await expect(bar(page).locator("[data-ttf=line]")).toHaveText("Offline · 1 waiting to send");
+  expect(await batch(r.id)).toEqual([]);
+
+  // The next automatic retry (5 s) gets through.
+  await page.unroute("**/api/me/comments");
+  await expect(pins(page).first()).not.toHaveClass(/unsent/, { timeout: 10_000 });
   expect((await batch(r.id)).map((c) => c.body)).toEqual(["Do not lose me"]);
 });
 
@@ -952,7 +946,7 @@ test("saved pins come back after reload", async ({ page }) => {
   await expect(sheet(page).locator(".status")).toHaveText("Open");
 });
 
-test("a save that never answers times out and keeps the text", async ({ page }) => {
+test("a save that never answers times out and waits on the phone", async ({ page }) => {
   // The page clock lets the overlay's 30 s save timeout pass without waiting for it.
   await page.clock.install();
   const r = await freshReviewer("Hung saver");
@@ -977,17 +971,14 @@ test("a save that never answers times out and keeps the text", async ({ page }) 
   await expect(save).toHaveText("Saving…"); // still waiting on the hung request
 
   await page.clock.fastForward(30_000);
-  await expect(sheet(page).locator("[data-ttf=save-error]")).toHaveText(
-    "Couldn't save. Check your connection and try again.",
-  );
-  await expect(box).toHaveValue("Still here after a hang");
-  await expect(save).toBeEnabled();
-  await expect(sheet(page).getByRole("button", { name: "Cancel" })).toBeEnabled();
+  await expect(sheet(page)).toBeHidden();
+  await expect(pins(page).first()).toHaveClass(/unsent/);
+  await expect(bar(page).locator("[data-ttf=line]")).toContainText("1 waiting to send");
 
   await page.unrouteAll({ behavior: "ignoreErrors" });
-  await save.tap();
+  await page.clock.fastForward(5_000); // the first automatic retry
+  await expect(pins(page).first()).not.toHaveClass(/unsent/);
   await expect(bar(page)).toContainText("1 comment");
-  await expect(sheet(page)).toBeHidden();
   expect((await batch(r.id)).map((c) => c.body)).toEqual(["Still here after a hang"]);
 });
 
