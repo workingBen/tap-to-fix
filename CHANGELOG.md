@@ -12,6 +12,8 @@ All notable changes to tap-to-fix are listed here. The format follows
   opens with a banner, badges and the three steps as real screenshots.
 - Reviewer links show a picture card when texted or pasted (iMessage, Slack): "Tap to Fix · Your pages to review".
   `npm run deploy` makes the image URL absolute using the saved service URL.
+- The owner dashboard has a **Review** link next to **Page** on every assigned page. It opens that page with
+  the Tap to Fix layer on, as that reviewer. It is grayed out while the reviewer's link is off.
 
 ### Changed
 

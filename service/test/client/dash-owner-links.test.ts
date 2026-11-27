@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { mountOwner, renderOwner, smsBody, smsHref, NOT_STORED_NOTE, type OwnerAssignment, type OwnerState, type Site } from "../../client/dash/owner";
+import { mountOwner, renderOwner, reviewPageUrl, smsBody, smsHref, tokenOf, NOT_STORED_NOTE, type OwnerAssignment, type OwnerState, type Site } from "../../client/dash/owner";
 
 const SITES: Site[] = [
   { slug: "greensprings", name: "Greensprings Longevity", origin: "https://greensprings.life", repo: "workingBen/longevity-tracker" },
@@ -198,5 +198,127 @@ describe("Copy link and Text link (mounted)", () => {
     await mountOwner(window);
     btn("copy-link").click();
     await vi.waitFor(() => expect(document.querySelector("[data-person=r1] .person-err")?.textContent).toContain("Run the deploy again."));
+  });
+});
+
+describe("Review link: the page in review mode as the reviewer", () => {
+  it("puts the token in the fragment the way the loader reads it, keeping other fragment parts", () => {
+    expect(reviewPageUrl("https://greensprings.life/x", "tok_abc-123")).toBe("https://greensprings.life/x#ttf=tok_abc-123");
+    expect(reviewPageUrl("https://greensprings.life/x?q=1", "t")).toBe("https://greensprings.life/x?q=1#ttf=t");
+    expect(reviewPageUrl("https://greensprings.life/x#faq&a=b", "t")).toBe("https://greensprings.life/x#faq&a=b&ttf=t");
+    expect(reviewPageUrl("https://greensprings.life/x#ttf=old&faq", "t")).toBe("https://greensprings.life/x#faq&ttf=t");
+  });
+
+  it("reads the token from a reviewer link", () => {
+    expect(tokenOf(URL1)).toBe("tok_abc-123");
+    expect(tokenOf("https://ttf.example/r/#a=1&ttf=t2")).toBe("t2");
+    expect(tokenOf("https://ttf.example/r/")).toBeNull();
+    expect(tokenOf("https://ttf.example/r/#ttf=")).toBeNull();
+  });
+
+  const row = (box: HTMLElement, id = "a1") => box.querySelector(`[data-row=${id}]`)!;
+  const links = (el: Element) => [...el.querySelectorAll(".lk .lnk")];
+
+  it("each page row has Page then Review, both opening a new tab, with line icons", () => {
+    const r = row(render({ overview: { reviewers: [ALEXIS, CHRIS], assignments: [a()] } }));
+    expect(links(r).map((l) => l.textContent)).toEqual(["Page", "Review"]);
+    for (const l of links(r)) {
+      expect(l.tagName).toBe("A");
+      expect(l.getAttribute("target")).toBe("_blank");
+      expect(l.getAttribute("rel")).toBe("noopener noreferrer");
+      expect(l.querySelector("svg")).not.toBeNull();
+    }
+  });
+
+  it("before the token is fetched, Review points at the plain page and is not marked ready", () => {
+    const review = row(render({ overview: { reviewers: [ALEXIS, CHRIS], assignments: [a()] } })).querySelector("a[data-review]")!;
+    expect(review.getAttribute("href")).toBe("https://greensprings.life/x");
+    expect(review.hasAttribute("data-ready")).toBe(false);
+    expect(review.getAttribute("data-id")).toBe("r1");
+  });
+
+  it("once the token is known, Review's href is the page with #ttf=<token>", () => {
+    const box = render({ overview: { reviewers: [ALEXIS, CHRIS], assignments: [a({ path: "/digital-detox" })] }, reviewTokens: { r1: "tok_abc-123" } });
+    const review = row(box).querySelector("a[data-review]")!;
+    expect(review.getAttribute("href")).toBe("https://greensprings.life/digital-detox#ttf=tok_abc-123");
+    expect(review.hasAttribute("data-ready")).toBe(true);
+    expect(row(box).querySelector("a.lnk:not([data-review])")!.getAttribute("href")).toBe("https://greensprings.life/digital-detox");
+  });
+
+  it("while the reviewer's link is off, Review is gray text, not a link, and says why", () => {
+    const off = a({ id: "c1", reviewer: { id: "r2", name: "Chris Tosswill" } });
+    const r = row(render({ overview: { reviewers: [ALEXIS, CHRIS], assignments: [off] }, reviewTokens: { r2: "stale" } }), "c1");
+    expect(r.querySelector("a[data-review]")).toBeNull();
+    const span = links(r)[1];
+    expect(span.tagName).toBe("SPAN");
+    expect(span.className).toBe("lnk plain");
+    expect(span.textContent).toBe("Review is off: Chris's link is off");
+    expect(span.getAttribute("title")).toBe("Chris's link is off. New link turns it back on.");
+    expect(r.innerHTML).not.toContain("stale");
+  });
+});
+
+describe("Review link (mounted)", () => {
+  let linkResponse: () => Response;
+  let linkCalls: number;
+  beforeEach(() => {
+    document.body.innerHTML = '<div id="app"></div>';
+    localStorage.clear();
+    history.replaceState(null, "", "/o/#owner=tok");
+    linkCalls = 0;
+    linkResponse = () => new Response(JSON.stringify({ url: URL1 }), { status: 200 });
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (path: string) => {
+        if (path.endsWith("/sites")) return new Response(JSON.stringify(SITES), { status: 200 });
+        if (path === "/api/owner/reviewers/r1/link") return (linkCalls++, linkResponse());
+        return new Response(JSON.stringify({ reviewers: [ALEXIS], assignments: [a({ path: "/digital-detox" })] }), { status: 200 });
+      }),
+    );
+    vi.stubGlobal("ClipboardItem", undefined);
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  const review = () => document.querySelector("[data-row=a1] a[data-review]") as HTMLAnchorElement;
+  const fakeTab = () => ({ opener: {} as unknown, location: { href: "" }, close: vi.fn() });
+
+  it("opens the tab inside the tap, before the fetch, then sends it to the page in review mode", async () => {
+    const tab = fakeTab();
+    const open = vi.fn(() => tab as unknown as Window);
+    vi.stubGlobal("open", open);
+    await mountOwner(window);
+    expect(linkCalls).toBe(0);
+    review().click();
+    expect(open).toHaveBeenCalledTimes(1); // synchronously, so iOS Safari does not block it
+    expect(open).toHaveBeenCalledWith("", "_blank");
+    expect(tab.opener).toBeNull();
+    await vi.waitFor(() => expect(tab.location.href).toBe("https://greensprings.life/digital-detox#ttf=tok_abc-123"));
+    expect(linkCalls).toBe(1);
+    // The row now carries the real href, so the next tap opens directly.
+    await vi.waitFor(() => expect(review().hasAttribute("data-ready")).toBe(true));
+    expect(review().getAttribute("href")).toBe("https://greensprings.life/digital-detox#ttf=tok_abc-123");
+  });
+
+  it("after Copy link, Review reuses the link already fetched: no second fetch", async () => {
+    Object.defineProperty(navigator, "clipboard", { configurable: true, value: { writeText: vi.fn(async () => {}) } });
+    await mountOwner(window);
+    (document.querySelector("[data-person=r1] [data-action=copy-link]") as HTMLButtonElement).click();
+    await vi.waitFor(() => expect(document.querySelector("[data-action=copy-link]")!.textContent).toBe("Copied"));
+    const tab = fakeTab();
+    vi.stubGlobal("open", vi.fn(() => tab as unknown as Window));
+    review().click();
+    await vi.waitFor(() => expect(tab.location.href).toBe("https://greensprings.life/digital-detox#ttf=tok_abc-123"));
+    expect(linkCalls).toBe(1);
+  });
+
+  it("a link made before links were kept: the tab closes and the plain note shows", async () => {
+    linkResponse = () => new Response('{"error":"x","code":"not_stored"}', { status: 409 });
+    const tab = fakeTab();
+    vi.stubGlobal("open", vi.fn(() => tab as unknown as Window));
+    await mountOwner(window);
+    review().click();
+    await vi.waitFor(() => expect(document.querySelector("[data-person=r1] [data-flash]")?.textContent).toContain(NOT_STORED_NOTE));
+    expect(tab.close).toHaveBeenCalled();
+    expect(tab.location.href).toBe("");
   });
 });

@@ -167,7 +167,10 @@ test("owner adds a site, a reviewer and an assignment", async ({ page }) => {
   await expect(morgan.locator("[data-row]", { hasText: "Owner page" })).toContainText("Not started");
   await expect(morgan.locator("[data-row]", { hasText: "Owner page" })).toContainText("No comments yet");
   await expect(assign).toHaveCount(0);
-  await expect(ownerRow(page, "Owner page").getByRole("link", { name: "Page" })).toHaveAttribute("href", "http://localhost:4173/other.html");
+  await expect(ownerRow(page, "Owner page").getByRole("link", { name: "Page", exact: true })).toHaveAttribute("href", "http://localhost:4173/other.html");
+  // Review opens the same page as Morgan: the new link's token is already known, so it is a plain href.
+  const token = link.slice(link.indexOf("#ttf=") + 5);
+  await expect(ownerRow(page, "Owner page").getByRole("link", { name: "Review", exact: true })).toHaveAttribute("href", `http://localhost:4173/other.html#ttf=${token}`);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 
   const reviewerPage = await page.context().newPage();
