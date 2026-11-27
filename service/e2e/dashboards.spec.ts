@@ -1,5 +1,5 @@
 import { readFileSync } from "node:fs";
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Locator, type Page } from "@playwright/test";
 
 const SERVICE = "http://localhost:8788";
 const ownerHeaders = () => ({ Authorization: `Bearer ${process.env.TTF_OWNER_TOKEN}`, "Content-Type": "application/json" });
@@ -42,9 +42,9 @@ async function markOpened(token: string, id: string): Promise<void> {
 }
 
 const dashboard = (page: Page, token: string) => page.goto(`${SERVICE}/r/#ttf=${encodeURIComponent(token)}`);
-const row = (page: Page, title: string) => page.locator("a[data-assignment]", { hasText: title });
+const row = (scope: Page | Locator, title: string) => scope.locator("a[data-assignment]", { hasText: title });
 
-test("reviewer sees their pages with chips", async ({ page }) => {
+test("reviewer sees their pages in sections", async ({ page }) => {
   const r = await reviewerWith("Dana Chips", [
     { path: "/index.html", title: "Home page" },
     { path: "/other.html", title: "Other page" },
@@ -56,12 +56,25 @@ test("reviewer sees their pages with chips", async ({ page }) => {
 
   await dashboard(page, r.token);
   await expect(page.getByRole("heading", { name: "Hi Dana." })).toBeVisible();
-  await expect(row(page, "Home page")).toContainText("Updated since you looked");
-  await expect(row(page, "Home page")).toContainText("1 comment · 1 settled");
-  await expect(row(page, "Other page")).toContainText("New");
-  await expect(row(page, "Other page")).toContainText("No comments yet");
-  // One site: no site headings.
-  await expect(page.locator("[data-site-heading]")).toHaveCount(0);
+  const updated = page.locator("section[data-section=updated]");
+  await expect(updated.locator("h2")).toHaveText("Updated since you looked 1");
+  await expect(row(updated, "Home page")).toContainText("1 comment · 1 settled");
+  await expect(row(updated, "Home page")).toContainText("All done");
+  const fresh = page.locator("section[data-section=new]");
+  await expect(fresh.locator("h2")).toHaveText("New 1");
+  await expect(row(fresh, "Other page")).toContainText("No comments yet");
+  // One site: the rows do not repeat its name.
+  await expect(row(page, "Other page").locator(".where")).toHaveText("· /other.html");
+  // The fixed comment is in the notice until Got it.
+  const notice = page.locator("[data-notice]");
+  await expect(notice.locator("a.li")).toHaveText(["Home page1 fixed"]);
+  const ack = page.waitForResponse((res) => res.url() === `${SERVICE}/api/me/acknowledge` && res.status() === 204);
+  await notice.getByRole("button", { name: "Got it" }).click();
+  await ack;
+  await expect(notice).toHaveCount(0);
+  await page.reload();
+  await expect(row(page, "Home page")).toBeVisible();
+  await expect(page.locator("[data-notice]")).toHaveCount(0);
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
 });
 
@@ -79,7 +92,28 @@ test("tapping a row marks it opened and goes to the page with ttf", async ({ pag
 
   // Back on the dashboard the page is no longer New.
   await dashboard(page, r.token);
-  await expect(row(page, "Other page")).not.toContainText("New");
+  await expect(row(page.locator("section[data-section=seen]"), "Other page")).toBeVisible();
+  await expect(page.locator("section[data-section=new]")).toHaveCount(0);
+});
+
+test("Review complete moves a page to Finished, and Re-review brings it back", async ({ page }) => {
+  const r = await reviewerWith("Dana Finish", [
+    { path: "/index.html", title: "Home page" },
+    { path: "/other.html", title: "Other page" },
+  ]);
+  await dashboard(page, r.token);
+  await page.getByRole("button", { name: "Actions for Home page" }).click();
+  const sheet = page.getByRole("dialog", { name: "Home page" });
+  await sheet.getByRole("button", { name: "Review complete" }).click();
+  await expect(sheet).toHaveCount(0);
+  const finished = page.locator("details[data-section=finished]");
+  await expect(finished.locator("summary")).toHaveText("Finished 1");
+  await expect(row(finished, "Home page")).toBeHidden();
+  await page.reload();
+  await finished.locator("summary").click();
+  await finished.getByRole("button", { name: "Re-review" }).click();
+  await expect(row(page.locator("section[data-section=new]"), "Home page")).toBeVisible();
+  await expect(finished).toHaveCount(0);
 });
 
 test("hash token survives reload and is kept in the address bar", async ({ page }) => {
