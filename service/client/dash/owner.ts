@@ -49,6 +49,11 @@ export type OwnerState = {
   flash: Flash | null;
   /** Reviewers whose "N done" fold is open; kept across re-renders. */
   foldsOpen?: string[];
+  /**
+   * Reviewer tokens fetched this visit, by reviewer id. While one is known, that reviewer's Review
+   * links are plain hrefs; until then a tap fetches it. Never fetched on load.
+   */
+  reviewTokens?: Record<string, string>;
 };
 export type PageCandidate = { site: string; path: string; title: string; lastAssignedTo: string[]; lastAssignedAt: string };
 export type ReadyBatch = { reviewerId: string; reviewerName: string; siteSlug: string; siteName: string; open: number; command: string };
@@ -78,6 +83,25 @@ export function fixCommand(
 
 export function reviewerLink(origin: string, token: string): string {
   return `${origin}/r/#ttf=${token}`;
+}
+
+/** The token in a reviewer link's "#ttf=" fragment, or null. */
+export function tokenOf(link: string): string | null {
+  const i = link.indexOf("#");
+  if (i < 0) return null;
+  const part = link.slice(i + 1).split("&").find((p) => p.slice(0, 4) === "ttf=");
+  return part ? part.slice(4) || null : null;
+}
+
+/**
+ * A page opened in review mode as one reviewer: the page URL with "ttf=<token>" in its fragment,
+ * the way the loader (client/loader.ts) reads it. Other fragment parts are kept; an old ttf= goes.
+ */
+export function reviewPageUrl(pageUrl: string, token: string): string {
+  const i = pageUrl.indexOf("#");
+  const base = i < 0 ? pageUrl : pageUrl.slice(0, i);
+  const parts = i < 0 ? [] : pageUrl.slice(i + 1).split("&").filter((p) => p !== "" && p.slice(0, 4) !== "ttf=");
+  return base + "#" + [...parts, "ttf=" + token].join("&");
 }
 
 export const NOT_STORED_NOTE =
@@ -248,6 +272,7 @@ const MESSAGE = svg('<path d="M4 5h16v11H10l-5 4v-4H4z"/>', 18);
 const MORE = svg('<circle cx="5" cy="12" r="1.2"/><circle cx="12" cy="12" r="1.2"/><circle cx="19" cy="12" r="1.2"/>');
 const PR = svg('<circle cx="6" cy="6" r="2.5"/><circle cx="6" cy="18" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M6 8.5v7M18 15.5V9a3 3 0 0 0-3-3h-4M13 3.5L10.5 6 13 8.5"/>', 17);
 const SEARCH = svg('<circle cx="11" cy="11" r="7"/><path d="M20 20l-4-4"/>');
+const PEN = svg('<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>', 17);
 const CHECK = svg('<path d="M5 12.5l4.5 4.5L19 7.5"/>', 16).replace('stroke-width="2"', 'stroke-width="3"');
 
 /**
@@ -356,10 +381,27 @@ function menuHtml(r: OwnerReviewer, batches: ReadyBatch[]): string {
   );
 }
 
-function pageHtml(a: OwnerAssignment, site: Site | undefined): string {
+/**
+ * The Review link: the page in review mode as this reviewer. A real href once the reviewer's token
+ * is known this visit; before that the plain page, and a tap fetches the token (mountOwner). While
+ * the reviewer's link is off there is nothing to open it with, so it is gray text that says so.
+ */
+function reviewHtml(a: OwnerAssignment, pageUrl: string, revoked: boolean, token: string | undefined): string {
+  const first = firstName(a.reviewer.name);
+  if (revoked) {
+    return `<span class="lnk plain" title="${esc(`${first}'s link is off. New link turns it back on.`)}">${PEN}<span>Review</span><span class="sr"> is off: ${esc(first)}'s link is off</span></span>`;
+  }
+  const href = token ? reviewPageUrl(pageUrl, token) : pageUrl;
+  return (
+    `<a class="lnk" data-review data-id="${esc(a.reviewer.id)}"${token ? " data-ready" : ""} href="${esc(href)}" target="_blank" rel="noopener noreferrer">${PEN}<span>Review</span></a>`
+  );
+}
+
+function pageHtml(a: OwnerAssignment, site: Site | undefined, revoked = false, token?: string): string {
   const links =
     (site
-      ? `<a class="lnk" href="${esc(site.origin + a.path)}" target="_blank" rel="noopener noreferrer">${OUT}<span>Page</span></a>`
+      ? `<a class="lnk" href="${esc(site.origin + a.path)}" target="_blank" rel="noopener noreferrer">${OUT}<span>Page</span></a>` +
+        reviewHtml(a, site.origin + a.path, revoked, token)
       : "") +
     a.pr_urls
       .map((u) =>
@@ -371,7 +413,7 @@ function pageHtml(a: OwnerAssignment, site: Site | undefined): string {
   const label = `Remove ${a.title} from ${firstName(a.reviewer.name)}'s list`;
   const status = STATUS_LABEL[a.status];
   // One compact entry: a status dot (its word is there for screen readers), the title, the site
-  // and path, the counts, then Page / PR links and a quiet remove button at the right.
+  // and path, the counts, then Page / Review / PR links and a quiet remove button at the right.
   return (
     `<li class="pg" data-row="${esc(a.id)}">` +
     `<span class="dot ${a.status}" aria-hidden="true" title="${status}"></span>` +
@@ -517,7 +559,7 @@ function personHtml(s: OwnerState, r: OwnerReviewer, batches: ReadyBatch[]): str
   const done = mine.filter((a) => a.status === "done");
   const id = esc(r.id);
   const first = esc(firstName(r.name));
-  const rows = (list: OwnerAssignment[]) => `<ul class="pgs">${list.map((a) => pageHtml(a, sites.get(a.site))).join("")}</ul>`;
+  const rows = (list: OwnerAssignment[]) => `<ul class="pgs">${list.map((a) => pageHtml(a, sites.get(a.site), r.revoked, s.reviewTokens?.[r.id])).join("")}</ul>`;
   // Finished pages fold away under "N done", so the list stays short as reviews pile up.
   const fold = done.length
     ? `<details class="fold" data-fold="${id}"${s.foldsOpen?.includes(r.id) ? " open" : ""}>` +
@@ -760,7 +802,7 @@ button { font: inherit; color: inherit; }
   .lnk { min-height: 44px; }
   .rm { width: 44px; height: 44px; margin: -10px -10px 0 0; opacity: .8; }
 }
-/* phones: the Page and PR links go on the counts line */
+/* phones: the Page, Review and PR links go on the counts line */
 @media (max-width: 560px) {
   .pg { grid-template-areas: "dot tt tt rm" ". tu tu rm" ". cn lk lk" ". err err err"; }
   .pg > .counts { align-self: center; }
@@ -944,7 +986,7 @@ export async function mountOwner(win: Window): Promise<void> {
     }
   }
 
-  const state: OwnerState = { sites: [], overview: { reviewers: [], assignments: [] }, assignFor: null, assign: null, flash: null, foldsOpen: [] };
+  const state: OwnerState = { sites: [], overview: { reviewers: [], assignments: [] }, assignFor: null, assign: null, flash: null, foldsOpen: [], reviewTokens: {} };
 
   // A reviewer's "N done" fold stays as the owner left it when the page re-renders. "toggle" does
   // not bubble, so it is caught on the way down.
@@ -970,6 +1012,14 @@ export async function mountOwner(win: Window): Promise<void> {
   main.addEventListener("click", (ev) => {
     const inside = (ev.target as Element | null)?.closest?.("details.more");
     for (const d of main.querySelectorAll("details.more[open]")) if (d !== inside) d.removeAttribute("open");
+    const review = (ev.target as Element | null)?.closest?.("a[data-review]") as HTMLAnchorElement | null;
+    if (review) {
+      // Token known: the href already opens review mode. Otherwise fetch it first.
+      if (review.hasAttribute("data-ready")) return;
+      ev.preventDefault();
+      void openReview(review);
+      return;
+    }
     const el = (ev.target as Element | null)?.closest?.("[data-action], [data-copy]") as HTMLElement | null;
     if (!el) return;
     void onClick(el);
@@ -1176,6 +1226,8 @@ export async function mountOwner(win: Window): Promise<void> {
       links.set(id, p);
       void p.then((r) => {
         if (!r.ok && links.get(id) === p) links.delete(id);
+        const t = r.ok ? tokenOf(r.data.url) : null;
+        if (t && links.get(id) === p) state.reviewTokens = { ...state.reviewTokens, [id]: t };
       });
     }
     return p;
@@ -1184,6 +1236,7 @@ export async function mountOwner(win: Window): Promise<void> {
   const linkFlash = (r: { id: string; name: string; token: string }) => {
     const url = reviewerLink(win.location.origin, r.token);
     links.set(r.id, Promise.resolve({ ok: true, data: { url } }));
+    state.reviewTokens = { ...state.reviewTokens, [r.id]: r.token };
     state.flash = { kind: "link", id: r.id, name: r.name, url };
   };
 
@@ -1246,6 +1299,45 @@ export async function mountOwner(win: Window): Promise<void> {
     if (!label) return;
     label.textContent = "Copied";
     setTimeout(() => (label.textContent = "Copy link"), 1800);
+  }
+
+  /** Forgets a reviewer's link (New link, Turn off link): their Review links fetch again. */
+  const dropLink = (id: string) => {
+    links.delete(id);
+    if (state.reviewTokens?.[id]) {
+      const { [id]: _gone, ...rest } = state.reviewTokens;
+      state.reviewTokens = rest;
+    }
+  };
+
+  /**
+   * Review, before the reviewer's token is known. The tab opens inside the tap (iOS Safari blocks a
+   * window.open made after an await), then goes to the page once the link arrives. The row then
+   * re-renders with a real href, so later taps open directly.
+   */
+  async function openReview(a: HTMLAnchorElement): Promise<void> {
+    const id = a.getAttribute("data-id") ?? "";
+    const reviewer = state.overview.reviewers.find((r) => r.id === id);
+    if (!reviewer) return;
+    const page = a.getAttribute("href") ?? "";
+    let tab: Window | null = null;
+    try {
+      tab = win.open("", "_blank");
+      if (tab) tab.opener = null;
+    } catch {
+      tab = null;
+    }
+    const res = await fetchLink(id);
+    const token = res.ok ? tokenOf(res.data.url) : null;
+    if (!res.ok || !token) {
+      tab?.close();
+      return res.ok ? failNear(a, { status: 0, error: "That link can't open a page." }) : linkFailed(a, reviewer, res);
+    }
+    state.reviewTokens = { ...state.reviewTokens, [id]: token };
+    const url = reviewPageUrl(page, token);
+    if (tab) tab.location.href = url;
+    else win.open(url, "_blank", "noopener");
+    render();
   }
 
   /** Text link: a new text message with the link in it; the link stays on screen in case Messages didn't open. */
@@ -1357,13 +1449,13 @@ export async function mountOwner(win: Window): Promise<void> {
       const res = await api<{ id: string; name: string; token: string }>(tok, `/api/owner/reviewers/${encodeURIComponent(id)}/reissue`, {
         method: "POST",
       });
-      links.delete(id);
+      dropLink(id);
       if (!res.ok) return failNear(el, res);
       linkFlash(res.data);
       await refresh();
     } else if (action === "revoke" && reviewer) {
       if (!win.confirm(revokeConfirm(reviewer.name))) return;
-      links.delete(id);
+      dropLink(id);
       const res = await api(tok, `/api/owner/reviewers/${encodeURIComponent(id)}/revoke`, { method: "POST" });
       if (!res.ok) return failNear(el, res);
       if (state.flash && state.flash.id === reviewer.id) state.flash = null;
