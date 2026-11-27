@@ -1,6 +1,6 @@
 // Bundles the browser code into public/. Run: node scripts/build-client.mjs [--watch]
 import { context, build } from "esbuild";
-import { copyFileSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,9 +24,12 @@ const reviewerPage = readFileSync(join(root, "client/pages/r.html"), "utf8").rep
 writeFileSync(join(root, "public/r/index.html"), reviewerPage);
 copyFileSync(join(root, "client/pages/og.jpg"), join(root, "public/r/og.jpg"));
 copyFileSync(join(root, "client/pages/o.html"), join(root, "public/o/index.html"));
+// Tab and home-screen icons, shared by both dashboards (rendered from docs/assets/brand/).
+mkdirSync(join(root, "public", "icons"), { recursive: true });
+for (const f of readdirSync(join(root, "client/pages/icons"))) copyFileSync(join(root, "client/pages/icons", f), join(root, "public/icons", f));
 writeFileSync(
   join(root, "public", "_headers"),
-  "/*\n  Referrer-Policy: no-referrer\n/*.js\n  Access-Control-Allow-Origin: *\n",
+  "/*\n  Referrer-Policy: no-referrer\n/*.js\n  Access-Control-Allow-Origin: *\n/icons/*\n  Cache-Control: public, max-age=86400\n",
 );
 
 if (process.argv.includes("--watch")) {
