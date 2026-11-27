@@ -16,6 +16,9 @@ All notable changes to tap-to-fix are listed here. The format follows
   the Tap to Fix layer on, as that reviewer. It is grayed out while the reviewer's link is off.
 - The dashboards have a real icon in the browser tab and on a phone's home screen (the green pin with a
   check) instead of a blank tile with a letter. The project site has the same icons.
+- Comments work inside same-origin frames (a page shown in `<iframe srcdoc>`): taps, pins, the Comment
+  cursor and screenshots all reach the framed page. The saved selector names the frame first, then the spot
+  inside it, joined by ` >>> `.
 
 ### Changed
 

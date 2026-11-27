@@ -1006,3 +1006,126 @@ test("the Saved notice uses one lasting live region", async ({ page }) => {
   await expect(bar(page)).toContainText("1 comment");
   expect(await live.evaluate((el, b) => el === b, before)).toBe(true);
 });
+
+// Same-origin frames: an article in <iframe srcdoc> (fixture/frame.html).
+const framed = (page: Page) => page.frameLocator("#story");
+
+async function openFramePage(page: Page, name: string): Promise<{ id: string; token: string }> {
+  const r = await owner<{ id: string; token: string }>("POST", "/reviewers", { name });
+  await owner("POST", "/assignments", { site: "fixture", reviewer_id: r.id, path: "/frame.html", title: "Fixture frame" });
+  await openAsReviewer(page, "/frame.html", r.token);
+  await expect(bar(page)).toContainText("Reviewing");
+  await expect(framed(page).locator("#inner-title")).toBeVisible();
+  return r;
+}
+
+test("a tap inside a same-origin frame pins the spot, saves a frame selector and comes back", async ({ page }, testInfo) => {
+  const touch = !!testInfo.project.use.hasTouch;
+  const r = await openFramePage(page, `Frame tapper ${testInfo.project.name}`);
+  const box = (await framed(page).locator("#inner-title").boundingBox())!;
+  const at = { x: box.x + 30, y: box.y + box.height / 2 };
+  if (touch) await page.touchscreen.tap(at.x, at.y);
+  else await page.mouse.click(at.x, at.y);
+  await expect(sheet(page)).toBeVisible();
+  await expect(sheet(page)).toContainText("Inside the frame");
+  await expect(pins(page)).toHaveCount(1);
+  const pt = (await pins(page).first().locator("svg").boundingBox())!;
+  expect(Math.abs(pt.x - at.x)).toBeLessThan(6);
+  expect(Math.abs(pt.y - at.y)).toBeLessThan(6);
+
+  await sheet(page).locator("textarea").fill("Bigger heading in the article");
+  const save = sheet(page).getByRole("button", { name: "Save comment" });
+  await (touch ? save.tap() : save.click());
+  await expect(bar(page)).toContainText("Saved");
+  const [c] = await batch(r.id);
+  expect(c.selector).toContain(" >>> ");
+  const resolves = await page.evaluate((sel) => {
+    const [outer, inner] = sel.split(" >>> ");
+    const f = document.querySelector(outer!) as HTMLIFrameElement | null;
+    return f?.contentDocument?.querySelector(inner!)?.id ?? null;
+  }, c.selector!);
+  expect(resolves).toBe("inner-title");
+  expect(c.has_screenshot).toBe(true);
+
+  // The screenshot shows the framed article, not an empty box: the red swatch is in it.
+  const swatch = (await framed(page).locator("#swatch").boundingBox())!;
+  const shot = await fetch(`${SERVICE}/api/owner/comments/${c.id}/screenshot`, { headers: ownerHeaders() });
+  const type = shot.headers.get("content-type") ?? "";
+  const bytes = Buffer.from(await shot.arrayBuffer());
+  const scroll = await page.evaluate(() => window.scrollY);
+  const pixel = await page.evaluate(
+    async ({ src, x, y, vw }) => {
+      const img = new Image();
+      img.src = src;
+      await img.decode();
+      const canvas = document.createElement("canvas");
+      canvas.width = img.naturalWidth;
+      canvas.height = img.naturalHeight;
+      const ctx = canvas.getContext("2d")!;
+      ctx.drawImage(img, 0, 0);
+      const k = img.naturalWidth / vw;
+      return Array.from(ctx.getImageData(Math.round(x * k), Math.round(y * k), 1, 1).data);
+    },
+    // The screenshot was taken before the page scrolled the pin above the sheet.
+    { src: `data:${type};base64,${bytes.toString("base64")}`, x: swatch.x + 100, y: swatch.y + 60 + scroll, vw: page.viewportSize()!.width },
+  );
+  expect(pixel[0]).toBeGreaterThan(150);
+  expect(pixel[1]).toBeLessThan(90);
+  expect(pixel[2]).toBeLessThan(120);
+
+  // A fresh load places the saved pin on the same heading, not flagged as moved.
+  await page.reload();
+  await expect(bar(page)).toContainText("1 comment");
+  await expect(pins(page)).toHaveCount(1);
+  await expect(pins(page).first()).not.toHaveClass(/moved/);
+  const again = (await framed(page).locator("#inner-title").boundingBox())!;
+  await expect(async () => {
+    const p = (await pins(page).first().locator("svg").boundingBox())!;
+    expect(Math.abs(p.x - (again.x + 30))).toBeLessThan(6);
+    expect(Math.abs(p.y - (again.y + again.height / 2))).toBeLessThan(6);
+  }).toPass();
+});
+
+test("a link inside a frame drops a pin instead of navigating; Use the page follows it", async ({ page }) => {
+  await openFramePage(page, "Frame linker");
+  await framed(page).locator("#inner-link").tap();
+  await expect(sheet(page)).toBeVisible();
+  expect(page.url()).toContain("/frame.html");
+  await sheet(page).getByRole("button", { name: "Cancel" }).tap();
+  await expect(pins(page)).toHaveCount(0);
+  await usePage(page).tap();
+  await framed(page).locator("#inner-link").tap();
+  await expect(framed(page).locator("h1")).toHaveText("The other page");
+});
+
+test("a frame added after the page loaded takes taps too", async ({ page }) => {
+  await openFramePage(page, "Late frame");
+  await page.evaluate(() => {
+    const f = document.createElement("iframe");
+    f.id = "late";
+    f.style.cssText = "display:block;width:100%;height:200px;border:0";
+    f.srcdoc = "<p id='late-p' style='font:18px sans-serif'>A late frame</p>";
+    document.body.append(f);
+  });
+  const late = page.frameLocator("#late").locator("#late-p");
+  await late.scrollIntoViewIfNeeded();
+  await late.tap();
+  await expect(sheet(page)).toBeVisible();
+  await expect(sheet(page)).toContainText("A late frame");
+});
+
+test("the ring outlines an element inside a frame where it sits on the page @desktop", async ({ page }) => {
+  await openFramePage(page, "Frame ring");
+  const box = (await framed(page).locator("#swatch").boundingBox())!;
+  await page.mouse.move(box.x + 50, box.y + 50);
+  await expect(cursor(page)).toBeVisible();
+  await expect(ring(page)).toBeVisible();
+  await expect(async () => {
+    const rb = (await ring(page).boundingBox())!;
+    expect(Math.abs(rb.x - (box.x - 3))).toBeLessThanOrEqual(2);
+    expect(Math.abs(rb.y - (box.y - 3))).toBeLessThanOrEqual(2);
+    expect(Math.abs(rb.width - (box.width + 6))).toBeLessThanOrEqual(2);
+    expect(Math.abs(rb.height - (box.height + 6))).toBeLessThanOrEqual(2);
+  }).toPass();
+  await expect(framed(page).locator("#ttf-cursor-style")).toHaveCount(1);
+});

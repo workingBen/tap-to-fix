@@ -111,6 +111,7 @@ Invoke `proofs:review-cycle` with the items from `<folder>/queue.md` as the open
 - **Every item's title starts with `[ttf <comment id>]`. Keep that tag** on the item's backlog entry, on its tracking-page card, in its PR body and in any design-review page, and on the Fix item that comes back from those picks. The tag is how each status call finds its comment.
 - **Each item's `Screenshot:` path is the reviewer's own phone or desktop BEFORE evidence**, taken at the device and viewport the item lists. Use it as the before for that width, and capture your own before only for the other width. Pair every after with a before taken at the same viewport.
 - **The page URL locates the page, and the `Selector` and `Element text` locate the spot the reviewer tapped.** Search the code for the element text first; the selector confirms it.
+  A selector with ` >>> ` points into a same-origin `<iframe>`: the part before it finds the iframe on the page, the part after it finds the spot in that frame's own page (an article shown in `<iframe srcdoc>` lives in its own template). Nested frames chain more ` >>> `.
 - **Checkpoints:** review-cycle may checkpoint and clear the conversation. Every checkpoint handoff must include this exact resume line: `/tap-to-fix:fix <reviewer> <site> --resume` (with the real reviewer and site). It must also note which items are parked in a design review or flagged, so a resumed run leaves those parked instead of reworking them. After a clear, run that line first.
 
 Review-cycle's own rules still apply in this repo, unchanged:
