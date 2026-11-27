@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { chipFor, countLine, mountReviewer, renderReviewer, type MeAssignment } from "../../client/dash/reviewer";
+import { chipFor, countLine, mountReviewer, readWaiting, renderReviewer, WAITING_KEY, type MeAssignment } from "../../client/dash/reviewer";
+import { encodeWaiting } from "../../client/handoff";
 
 function assignment(over: Partial<MeAssignment> = {}, counts: Partial<MeAssignment["counts"]> = {}): MeAssignment {
   return {
@@ -99,6 +100,58 @@ describe("renderReviewer", () => {
   });
 });
 
+describe("waiting comments (offline mode's hand-off)", () => {
+  const text = (html: string) => new DOMParser().parseFromString(html, "text/html").body.textContent ?? "";
+  it("one line with the total, and a note on each row that has some", () => {
+    const html = renderReviewer(
+      {
+        name: "Ben",
+        assignments: [assignment({}, { total: 1, open: 1 }), assignment({ id: "a2", path: "/cold", title: "Cold plunge" })],
+      },
+      { "bonus-decade": { "/sauna": 2, "/cold": 1, "/not-mine": 4 } },
+    );
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    expect(doc.querySelector("[data-waiting-line] b")?.textContent).toBe("3 comments waiting to send");
+    expect(doc.querySelector("[data-waiting-line]")?.textContent).toContain("Open each page while you're online and they send.");
+    const rows = [...doc.querySelectorAll(".counts")].map((c) => c.textContent);
+    // A page with no saved comments shows only what is waiting, not "No comments yet".
+    expect(rows).toEqual(["1 comment · 2 waiting to send", "1 waiting to send"]);
+  });
+  it("one waiting is singular, and nothing waiting shows no line", () => {
+    expect(text(renderReviewer({ name: "Ben", assignments: [assignment()] }, { "bonus-decade": { "/sauna": 1 } }))).toContain(
+      "1 comment waiting to send",
+    );
+    const none = renderReviewer({ name: "Ben", assignments: [assignment()] }, {});
+    expect(none).not.toContain("data-waiting-line");
+    expect(text(none)).toContain("No comments yet");
+  });
+  it("counts from another site's slug never land on this site's rows", () => {
+    const html = renderReviewer({ name: "Ben", assignments: [assignment()] }, { gl: { "/sauna": 5 } });
+    expect(html).not.toContain("waiting to send");
+  });
+});
+
+describe("readWaiting", () => {
+  beforeEach(() => window.localStorage.clear());
+  afterEach(() => window.history.replaceState(null, "", "/r/"));
+  it("keeps the Done link's report, and a later report of none clears that site", () => {
+    window.history.replaceState(null, "", "/r/#ttf=tok&" + encodeWaiting("bonus-decade", { "/sauna": 2 }));
+    expect(readWaiting(window)).toEqual({ "bonus-decade": { "/sauna": 2 } });
+    window.history.replaceState(null, "", "/r/#ttf=tok&" + encodeWaiting("gl", { "/x": 1 }));
+    expect(readWaiting(window)).toEqual({ "bonus-decade": { "/sauna": 2 }, gl: { "/x": 1 } });
+    window.history.replaceState(null, "", "/r/#ttf=tok");
+    expect(readWaiting(window)).toEqual({ "bonus-decade": { "/sauna": 2 }, gl: { "/x": 1 } }); // kept between visits
+    window.history.replaceState(null, "", "/r/#ttf=tok&" + encodeWaiting("bonus-decade", { "/sauna": 0 }));
+    expect(readWaiting(window)).toEqual({ gl: { "/x": 1 } });
+    expect(JSON.parse(window.localStorage.getItem(WAITING_KEY)!)).toEqual({ gl: { "/x": 1 } });
+  });
+  it("ignores junk in storage", () => {
+    window.localStorage.setItem(WAITING_KEY, "not json");
+    window.history.replaceState(null, "", "/r/#ttf=tok");
+    expect(readWaiting(window)).toEqual({});
+  });
+});
+
 describe("mountReviewer", () => {
   beforeEach(() => {
     window.localStorage.clear();
@@ -133,6 +186,13 @@ describe("mountReviewer", () => {
     expect(btn).toBeTruthy();
     btn!.click();
     await vi.waitFor(() => expect(document.body.textContent).toContain("Nothing to review yet."));
+  });
+  it("shows the Done link's waiting count, then drops it from the address but keeps the token", async () => {
+    window.history.replaceState(null, "", "/r/#ttf=tok&" + encodeWaiting("bonus-decade", { "/sauna": 2 }));
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ name: "Ben", assignments: [assignment()] }))));
+    await mountReviewer(window);
+    expect(document.body.textContent).toContain("2 comments waiting to send");
+    expect(window.location.hash).toBe("#ttf=tok");
   });
   it("restores the hash from storage so the address bar keeps a working link", async () => {
     window.localStorage.setItem("ttf:dash-token", "kept");

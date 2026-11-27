@@ -19,9 +19,21 @@ All notable changes to tap-to-fix are listed here. The format follows
 - Comments work inside same-origin frames (a page shown in `<iframe srcdoc>`): taps, pins, the Comment
   cursor and screenshots all reach the framed page. The saved selector names the frame first, then the spot
   inside it, joined by ` >>> `.
+- Offline mode for reviewers. Comments and their screenshots save on the phone (the site's IndexedDB) and send
+  when the service can be reached: when the page opens, when the phone comes back online, when the tab is shown
+  again, and on a slow retry. A gray line above the bar says "Offline · Comments still save" or "Offline · 3 waiting
+  to send"; unsent pins are hollow; sending shows "Sending 2 of 3", then "All 3 sent". A comment that didn't send
+  shows an amber "1 didn't send · See why" with its words, Try again now and, for a refusal retrying can't fix,
+  Copy text. Pins still show on a page opened offline, from the last list it loaded. **Done** tells the reviewer
+  list how many are waiting on each page.
+- `POST /api/me/comments` takes an optional `client_id`; the same id from the same reviewer's page is stored once,
+  and a repeat answers `200` with the original id. Migration `0003_comment_client_id.sql` adds the column and
+  its unique index.
 
 ### Changed
 
+- A save with no network at all (or one that times out) no longer stops at "Couldn't save" in the sheet: the
+  comment waits on the phone and sends on its own. A refusal from the service still shows in the sheet as before.
 - The comment layer opens in **Use the page** instead of **Comment**, so a reviewer's first tap works the page.
   Once they pick Comment, it stays Comment across pages in that tab. The reviewer list now says to tap Comment first.
 

@@ -16,19 +16,55 @@ export const isSettled = (s: Status): boolean => s === "done" || s === "later" |
 
 export type BarState =
   | { kind: "loading" }
-  | { kind: "reviewing"; count: number; saved?: boolean }
+  /** saved: the note after a save ("Saved", or "Saved on this phone" when it waits to send). */
+  | { kind: "reviewing"; count: number; saved?: "sent" | "phone" | null; line?: LineState | null }
   | { kind: "not_assigned" }
-  | { kind: "signed_out" }
-  | { kind: "offline" };
+  | { kind: "signed_out" };
+
+/** The status line just above the pill (offline mode), in the spot "Saved" uses. */
+export type LineState =
+  | { kind: "offline"; waiting: number }
+  /** Online, with comments waiting for their next retry. */
+  | { kind: "waiting"; waiting: number }
+  | { kind: "sending"; done: number; total: number }
+  | { kind: "sent"; total: number }
+  | { kind: "failed"; count: number };
+
+/** One comment in the "didn't send" sheet. reason: why the service refused it; null: it keeps trying. */
+export type FailedView = { id: string; body: string; reason: string | null };
+
+const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
+
+/** The line's words, as the design review settled them. */
+export function lineText(state: LineState): { strong: string; rest: string | null; link: string | null } {
+  switch (state.kind) {
+    case "offline":
+      return { strong: "Offline", rest: state.waiting ? `${state.waiting} waiting to send` : "Comments still save", link: null };
+    case "waiting":
+      return { strong: `${state.waiting} waiting to send`, rest: null, link: null };
+    case "sending":
+      return {
+        strong: state.total === 1 ? "Sending 1 comment" : `Sending ${Math.min(state.done + 1, state.total)} of ${state.total}`,
+        rest: null,
+        link: null,
+      };
+    case "sent":
+      return { strong: state.total === 1 ? "1 comment sent" : `All ${state.total} sent`, rest: null, link: null };
+    case "failed":
+      return { strong: `${state.count} didn't send`, rest: null, link: "See why" };
+  }
+}
 
 /** A pin in DOCUMENT coordinates. */
 /** onBar: anchored to an element inside the site's own top bar, so the bar never covers it. */
-export type PinView = { n: number; x: number; y: number; settled?: boolean; moved?: boolean; draft?: boolean; onBar?: boolean };
+/** unsent: still on the phone (offline mode), drawn hollow until the service has it. */
+export type PinView = { n: number; x: number; y: number; settled?: boolean; moved?: boolean; draft?: boolean; onBar?: boolean; unsent?: boolean };
 
 /** Far enough to never clip a pin on the sides or bottom of the zero-size pins layer. */
 const CLIP_FAR = 100_000;
 
-export type ReadView = { n: number; body: string; status: Status; note: string | null; moved: boolean };
+/** unsent: not sent yet; reason says why the service refused it, null while it keeps trying. */
+export type ReadView = { n: number; body: string; status: Status; note: string | null; moved: boolean; unsent?: { reason: string | null } };
 
 const CURSOR_STYLE_ID = "ttf-cursor-style";
 const SVG_NS = "http://www.w3.org/2000/svg";
@@ -56,6 +92,9 @@ const ALERT_ICON = ["M12 3l9.5 17h-19z", "M12 10v4", "M12 17.5v.01"];
 const PEN_ICON = ["M4 20h4L19 9l-4-4L4 16z", "M13.5 6.5l4 4"];
 const POINTER_ICON = ["M5 3l14 7-6.5 2L10 19z"];
 const CHECK_ICON = ["M5 12.5l4.5 4.5L19 7.5"];
+const OFFLINE_ICON = ["M2 2l20 20", "M5.8 5.8A7 7 0 0 0 9 19h8.5a4.5 4.5 0 0 0 1.3-.2", "M21.5 16.5A4.5 4.5 0 0 0 17.5 10h-1.8A7 7 0 0 0 10 5.1"];
+const SEND_ICON = ["M12 16V4", "M7 9l5-5 5 5", "M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3"];
+const PHONE_ICON = ["M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z", "M11 18h2"];
 
 function el<K extends keyof HTMLElementTagNameMap>(
   tag: K,
@@ -85,6 +124,10 @@ export class OverlayUI {
   private readonly bar: HTMLDivElement;
   /** One persistent live region, so screen readers announce "Saved" when its text appears. */
   private readonly savedNote: HTMLSpanElement;
+  /** Offline mode's status line, in the same spot; hidden while "Saved" shows. */
+  private readonly line: HTMLButtonElement;
+  private lineState: LineState | null = null;
+  private dashboardHref: string;
   private readonly pinsLayer: HTMLDivElement;
   /** Pins on the site's top bar itself: same coordinates, never clipped. */
   private readonly barPinsLayer: HTMLDivElement;
@@ -99,13 +142,15 @@ export class OverlayUI {
   private mayDismiss: (() => boolean) | null = null;
   onPinTap: (n: number) => void = () => {};
   onModeChange: (m: Mode) => void = () => {};
+  onLineTap: (state: LineState) => void = () => {};
   private mode: Mode = "use";
   private readonly cursor: HTMLDivElement;
   private readonly ring: HTMLDivElement;
   /** Documents (this page and same-origin frames) carrying the hide-the-arrow style. */
   private readonly arrowHidden = new Set<Document>();
 
-  constructor(private readonly doc: Document, private readonly dashboardUrl: string) {
+  constructor(private readonly doc: Document, dashboardUrl: string) {
+    this.dashboardHref = dashboardUrl;
     this.host = doc.createElement("tap-to-fix-overlay");
     // Open, not closed: tests need to reach in, and the page can already read the token anyway.
     const shadow = this.host.attachShadow({ mode: "open" });
@@ -113,7 +158,13 @@ export class OverlayUI {
     style.textContent = OVERLAY_CSS;
     this.bar = el("div", { class: "bar", "data-ttf": "bar", role: "region", "aria-label": "Review bar" });
     this.savedNote = el("span", { class: "saved", role: "status", "data-ttf": "saved" });
-    this.bar.append(this.savedNote);
+    // aria-live, not role=status: "Saved" keeps the one status region; this one speaks up too.
+    this.line = el("button", { type: "button", class: "line", "data-ttf": "line", "aria-live": "polite" });
+    this.line.hidden = true;
+    this.line.addEventListener("click", () => {
+      if (this.lineState) this.onLineTap(this.lineState);
+    });
+    this.bar.append(this.savedNote, this.line);
     this.pinsLayer = el("div", { class: "pins", "data-ttf": "pins" });
     this.barPinsLayer = el("div", { class: "pins", "data-ttf": "bar-pins" });
     this.sheet = el("div", { class: "sheet", "data-ttf": "sheet", role: "dialog", "aria-modal": "false" });
@@ -143,7 +194,7 @@ export class OverlayUI {
   }
 
   setBar(state: BarState): void {
-    const link = (text: string) => el("a", { href: this.dashboardUrl }, text);
+    const link = (text: string) => el("a", { href: this.dashboardHref, "data-ttf": "dash-link" }, text);
     const warn = (text: string) => el("span", { class: "msg" }, icon(ALERT_ICON), text);
     let content: Node[];
     switch (state.kind) {
@@ -164,16 +215,49 @@ export class OverlayUI {
       case "signed_out":
         content = [warn("This link no longer works. Ask for a new one.")];
         break;
-      case "offline":
-        content = [warn("Can't reach the review service right now.")];
-        break;
     }
-    // Replace everything except the live region, which stays put (it is positioned absolutely above the pill).
-    for (const n of [...this.bar.childNodes]) if (n !== this.savedNote) n.remove();
+    // Replace everything except the live region and the line, which stay put (both are
+    // positioned absolutely above the pill).
+    for (const n of [...this.bar.childNodes]) if (n !== this.savedNote && n !== this.line) n.remove();
     this.bar.prepend(...content);
-    const saved = state.kind === "reviewing" && !!state.saved;
-    if (saved && !this.savedNote.textContent) this.savedNote.replaceChildren(icon(CHECK_ICON), "Saved");
+    const saved = state.kind === "reviewing" ? (state.saved ?? null) : null;
+    const words = saved === "phone" ? "Saved on this phone" : "Saved";
+    if (saved && this.savedNote.textContent !== words) this.savedNote.replaceChildren(icon(CHECK_ICON), words);
     if (!saved) this.savedNote.replaceChildren();
+    this.paintLine(state.kind === "reviewing" && !saved ? (state.line ?? null) : null);
+  }
+
+  private paintLine(state: LineState | null): void {
+    const same = JSON.stringify(state) === JSON.stringify(this.lineState);
+    this.lineState = state;
+    this.line.hidden = !state;
+    if (same) return;
+    if (!state) {
+      this.line.replaceChildren();
+      this.line.removeAttribute("data-kind");
+      return;
+    }
+    const t = lineText(state);
+    const ic =
+      state.kind === "offline" ? OFFLINE_ICON : state.kind === "sending" ? SEND_ICON : state.kind === "sent" ? CHECK_ICON : state.kind === "failed" ? ALERT_ICON : PHONE_ICON;
+    // One run of text with real spaces, so it reads (and is announced) as "Offline · 3 waiting to send".
+    const words = el("span", { class: "words" }, el("b", {}, t.strong));
+    if (t.rest) words.append(" ", el("span", { class: "sep" }, "·"), " ", t.rest);
+    if (t.link) words.append(" ", el("span", { class: "sep" }, "·"), " ", el("span", { class: "u" }, t.link));
+    const parts: Node[] = [icon(ic), words];
+    if (state.kind === "sending") {
+      // The one being sent counts as half done, so the track moves as soon as sending starts.
+      const pct = Math.round(((state.done + 0.5) / state.total) * 100);
+      parts.push(el("span", { class: "track", "aria-hidden": "true" }, el("i", { style: `width:${pct}%` })));
+    }
+    this.line.replaceChildren(...parts);
+    this.line.setAttribute("data-kind", state.kind);
+  }
+
+  /** Where Done goes: the dashboard, with this site's waiting counts (see ../handoff.ts). */
+  setDashboardHref(href: string): void {
+    this.dashboardHref = href;
+    for (const a of this.bar.querySelectorAll("a[data-ttf=dash-link]")) a.setAttribute("href", href);
   }
 
   /** The Comment / Use the page switch. Built fresh on every bar render, so no listener outlives its button. */
@@ -297,10 +381,10 @@ export class OverlayUI {
     const nodes = this.pins.map((p): [HTMLButtonElement, boolean] => {
       const flip = p.x - win.scrollX + PIN_FLIP_MARGIN > win.innerWidth;
       const dir: Dir = flip ? -1 : 1;
-      const cls = ["pin", flip ? "flip" : "", p.settled ? "settled" : "", p.moved ? "moved" : "", p.draft ? "new" : ""].filter(Boolean);
+      const cls = ["pin", flip ? "flip" : "", p.settled ? "settled" : "", p.moved ? "moved" : "", p.draft ? "new" : "", p.unsent ? "unsent" : ""].filter(Boolean);
       const b = el(
         "button",
-        { type: "button", class: cls.join(" "), "data-ttf": "pin", "aria-label": `Comment ${p.n}` },
+        { type: "button", class: cls.join(" "), "data-ttf": "pin", "aria-label": p.unsent ? `Comment ${p.n}, not sent yet` : `Comment ${p.n}` },
         el("span", { class: "dot" }, String(p.n)),
       );
       // The hit area surrounds the body; the tail's point (the svg origin, 12/49 px in) is the tap spot.
@@ -382,21 +466,93 @@ export class OverlayUI {
     close.addEventListener("click", () => this.closeSheet());
     const badge = el(
       "span",
-      { class: ["badge", isSettled(view.status) ? "settled" : "", view.moved ? "moved" : ""].filter(Boolean).join(" ") },
+      {
+        class: ["badge", isSettled(view.status) ? "settled" : "", view.moved ? "moved" : "", view.unsent ? "unsent" : ""].filter(Boolean).join(" "),
+      },
       el("span", { class: "dot" }, String(view.n)),
     );
     if (view.moved) badge.append(el("span", { class: "moved-label" }, "moved"));
-    const details = el(
-      "div",
-      {},
-      el("h2", { class: "sheet-h", id: "ttf-sheet-h" }, "Your comment"),
-      el("p", { class: "body" }, view.body),
-      el("span", { class: isSettled(view.status) ? "status settled" : "status" }, STATUS_LABELS[view.status] ?? view.status),
-    );
-    if ((view.status === "later" || view.status === "kept") && view.note) {
+    const details = el("div", {}, el("h2", { class: "sheet-h", id: "ttf-sheet-h" }, "Your comment"), el("p", { class: "body" }, view.body));
+    if (view.unsent) {
+      // Where the status usually goes: it is still on this phone.
+      details.append(
+        el("span", { class: "status unsent", "data-ttf": "unsent" }, icon(PHONE_ICON), "Not sent yet"),
+        el("p", { class: "note" }, view.unsent.reason ?? "Saved on this phone. It sends when you're back online."),
+      );
+    } else {
+      details.append(el("span", { class: isSettled(view.status) ? "status settled" : "status" }, STATUS_LABELS[view.status] ?? view.status));
+    }
+    if (!view.unsent && (view.status === "later" || view.status === "kept") && view.note) {
       details.append(el("p", { class: "note" }, view.note));
     }
     this.show([el("div", { class: "read-head" }, badge, details), el("div", { class: "actions" }, close)], null);
+    close.focus({ preventScroll: true });
+  }
+
+  /** What offline means, from a tap on the "Offline" line. */
+  openOffline(): void {
+    const ok = el("button", { type: "button", class: "btn primary" }, "OK");
+    ok.addEventListener("click", () => this.closeSheet());
+    this.show(
+      [
+        el("h2", { class: "sheet-h", id: "ttf-sheet-h" }, "You're offline"),
+        el("p", { class: "lede ink" }, "Keep commenting. Each comment and its screenshot is saved on this phone."),
+        el("p", { class: "lede" }, "They send on their own when you're back online with a Tap to Fix page open."),
+        el("div", { class: "actions" }, ok),
+      ],
+      null,
+    );
+    ok.focus({ preventScroll: true });
+  }
+
+  /**
+   * The comments that didn't send, from "See why": each one's own words, a promise it is still on
+   * the phone, and Try again. One the service refused (retrying won't fix it) says why and gets
+   * Copy text, so the words are never stuck, and Remove.
+   */
+  openFailed(items: FailedView[], opts: { onRetry: () => void; onCopy: (id: string) => Promise<boolean>; onRemove: (id: string) => void }): void {
+    const retry = el("button", { type: "button", class: "btn primary", "data-ttf": "retry" }, "Try again now");
+    retry.addEventListener("click", () => {
+      this.closeSheet();
+      opts.onRetry();
+    });
+    const close = el("button", { type: "button", class: "btn ghost" }, "Close");
+    close.addEventListener("click", () => this.closeSheet());
+    const blocks = items.map((f) => {
+      const block = el("div", { class: "failed", "data-ttf": "failed" }, el("p", { class: "quote body" }, f.body));
+      if (f.reason) {
+        const copy = el("button", { type: "button", class: "btn line-btn", "data-ttf": "copy" }, "Copy text");
+        copy.addEventListener("click", () => {
+          void opts.onCopy(f.id).then((ok) => {
+            copy.textContent = ok ? "Copied" : "Couldn't copy";
+          });
+        });
+        const remove = el("button", { type: "button", class: "btn ghost", "data-ttf": "remove" }, "Remove");
+        remove.addEventListener("click", () => {
+          const win = this.doc.defaultView ?? window;
+          if (!win.confirm("Remove this comment from this phone? Copy its text first if you still need it.")) return;
+          this.closeSheet();
+          opts.onRemove(f.id);
+        });
+        block.append(el("p", { class: "lede reason" }, f.reason), el("div", { class: "pair" }, copy, remove));
+      }
+      return block;
+    });
+    const refusedOnly = items.every((f) => f.reason);
+    const still = items.length === 1 ? "It's still saved on this phone." : "They're still saved on this phone.";
+    this.show(
+      [
+        el("h2", { class: "sheet-h", id: "ttf-sheet-h" }, `${plural(items.length, "comment", "comments")} didn't send`),
+        ...blocks,
+        el(
+          "p",
+          { class: "lede" },
+          refusedOnly ? still : `${still} Tap to Fix keeps trying while this page is open.`,
+        ),
+        el("div", { class: "actions" }, retry, close),
+      ],
+      null,
+    );
     close.focus({ preventScroll: true });
   }
 

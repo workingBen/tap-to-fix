@@ -53,6 +53,26 @@ svg { flex: none; }
 }
 .root .bar .saved:empty { display: none; }
 .bar .saved svg { color: var(--acc); }
+/* Offline mode's status line: the same spot, as a quiet pill of its own. Gray: being offline is
+   not a fault. Green once everything is sent; amber only when a comment didn't send. */
+.root .bar .line {
+  position: absolute; left: 50%; transform: translateX(-50%); bottom: calc(100% + 12px);
+  display: inline-flex; align-items: center; gap: 8px; white-space: nowrap;
+  min-height: 44px; padding: 0 16px 0 13px; border-radius: 999px; overflow: hidden;
+  background: var(--surf); border: 1px solid var(--line); box-shadow: 0 4px 16px rgba(0, 0, 0, .14);
+  color: var(--mut); font-weight: 600; cursor: pointer; -webkit-tap-highlight-color: transparent;
+}
+.root .bar .line[hidden] { display: none; }
+.root .bar .line * { color: var(--mut); font-weight: 600; }
+.root .bar .line b { color: var(--ink); }
+.root .bar .line .sep { font-weight: 400; margin: 0 2px; }
+.root .bar .line .u { text-decoration: underline; text-underline-offset: 3px; }
+.root .bar .line[data-kind="sent"], .root .bar .line[data-kind="sent"] * { color: var(--acc); }
+.root .bar .line[data-kind="failed"] { background: var(--warn-bg); border-color: #EBD3A8; }
+.root .bar .line[data-kind="failed"], .root .bar .line[data-kind="failed"] * { color: var(--warn); }
+.root .bar .line .track { position: absolute; left: 14px; right: 14px; bottom: 5px; height: 3px; border-radius: 2px; background: var(--line); }
+.root .bar .line .track i { display: block; height: 100%; border-radius: 2px; background: var(--acc); transition: width .3s ease-out; }
+.bar .line:focus-visible { outline: 3px solid var(--acc); outline-offset: 2px; }
 @media (max-width: 599px) {
   .bar .count { display: none; }
   /* 375px phones: nothing to the left of the switch, and tighter padding, so Done stays inside the pill. */
@@ -112,6 +132,9 @@ svg { flex: none; }
 .root .pin.flip svg { left: 32px; }
 .root .pin .body { fill: color-mix(in srgb, var(--ink) 80%, transparent); }
 .root .pin.settled .body, .root .pin.new .body { fill: color-mix(in srgb, var(--acc) 80%, transparent); }
+/* Not sent yet (offline mode): hollow until the service has it. */
+.root .pin.unsent .body { fill: var(--surf); stroke: var(--ink); stroke-width: 2.5; stroke-linejoin: round; }
+.root .pin.unsent .dot { color: var(--ink); }
 .root .pin .ring { fill: none; stroke: color-mix(in srgb, var(--bg) 70%, transparent); stroke-width: 6; stroke-linejoin: round; }
 .root .pin .mv { display: none; fill: none; stroke: var(--ink); stroke-width: 2; stroke-dasharray: 4 3; }
 .root .pin.moved .mv { display: block; }
@@ -128,6 +151,7 @@ svg { flex: none; }
 }
 .root .badge.settled .dot { background: var(--acc); }
 .root .badge.moved .dot { outline: 2px dashed var(--ink); outline-offset: 4px; }
+.root .badge.unsent .dot { background: var(--surf); color: var(--ink); border: 2.5px solid var(--ink); }
 .pin.new { pointer-events: none; }
 .root .pin.new svg { filter: drop-shadow(0 0 6px color-mix(in srgb, var(--acc) 55%, transparent)); }
 
@@ -182,4 +206,16 @@ svg { flex: none; }
 }
 .root .status.settled { background: var(--acc); color: var(--acc-ink); }
 .root .note { color: var(--mut); margin-top: 8px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.root .status.unsent { gap: 8px; background: #F1EEE7; }
+.root .status.unsent svg { color: var(--ink); }
+
+/* offline and "didn't send" sheets */
+.root .lede { color: var(--mut); margin-bottom: 12px; }
+.root .lede.ink { color: var(--ink); }
+.root .sheet-h + .lede, .root .sheet-h + .failed { margin-top: 6px; }
+.root .quote { border-left: 3px solid var(--line); padding: 2px 0 2px 12px; margin-bottom: 14px; }
+.root .failed .reason { color: var(--warn); font-weight: 600; margin: -6px 0 8px; }
+.root .failed .pair { display: flex; gap: 8px; margin-bottom: 14px; }
+.root .failed .pair .btn { width: auto; flex: 1; min-height: 44px; padding: 8px 12px; }
+.root .btn.line-btn { background: var(--surf); color: var(--acc); border: 1.5px solid var(--line); }
 `;

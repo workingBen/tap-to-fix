@@ -2,6 +2,7 @@
 // Pure view functions (data in, HTML out) plus a thin mount layer that talks to the API.
 import { api, escapeHtml, progressRing, readToken } from "./common";
 import { DASH_CSS } from "./dash.css";
+import { decodeWaiting, mergeWaiting, stripWaiting, type WaitingBySite } from "../handoff";
 
 export type MeAssignment = {
   id: string;
@@ -19,6 +20,8 @@ export type MeResponse = { name: string; assignments: MeAssignment[] };
 export type Chip = "Updated since you looked" | "New" | "All done";
 
 export const STORAGE_KEY = "ttf:dash-token";
+/** Comments waiting to send on each site, as the overlay's Done link last reported them. */
+export const WAITING_KEY = "ttf:waiting";
 const OPENED_WAIT_MS = 1500;
 
 const MSG_EMPTY = "Nothing to review yet. Ben will add pages here.";
@@ -43,6 +46,34 @@ export function countLine(a: MeAssignment): string {
   return parts.join(" · ");
 }
 
+/** This dashboard's copy of the waiting counts, with any report in the address folded in. */
+export function readWaiting(win: Window): WaitingBySite {
+  let known: WaitingBySite = {};
+  try {
+    const raw = JSON.parse(win.localStorage.getItem(WAITING_KEY) ?? "{}") as unknown;
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) known = raw as WaitingBySite;
+  } catch {
+    known = {};
+  }
+  const report = decodeWaiting(win.location.hash);
+  if (!report) return known;
+  known = mergeWaiting(known, report);
+  try {
+    win.localStorage.setItem(WAITING_KEY, JSON.stringify(known));
+  } catch {
+    /* storage blocked: the counts still show for this visit */
+  }
+  return known;
+}
+
+const waitingFor = (w: WaitingBySite, a: MeAssignment): number => {
+  const n = w[a.site.slug]?.[a.path];
+  return typeof n === "number" && n > 0 ? n : 0;
+};
+
+const PHONE =
+  '<svg aria-hidden="true" width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M8 2h8a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2z"/><path d="M11 18h2"/></svg>';
+
 const CHECK =
   '<svg aria-hidden="true" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>';
 const CHEVRON =
@@ -55,7 +86,9 @@ function chipHtml(chip: Chip | null): string {
 }
 
 /** `grouped`: rows sit under a site heading, so the site name is not repeated. */
-function rowHtml(a: MeAssignment, grouped = false): string {
+function rowHtml(a: MeAssignment, grouped = false, waiting = 0): string {
+  const parts = a.counts.total === 0 && waiting ? [] : countLine(a).split(" · ").map((p) => `<span class="part">${escapeHtml(p)}</span>`);
+  if (waiting) parts.push(`<span class="part pend" data-waiting>${waiting} waiting to send</span>`);
   return (
     `<a class="row" href="${escapeHtml(a.url)}" data-assignment="${escapeHtml(a.id)}">` +
     `<span class="ring">${progressRing(a.progress, 44)}</span>` +
@@ -63,10 +96,7 @@ function rowHtml(a: MeAssignment, grouped = false): string {
     `<span class="title">${escapeHtml(a.title)}</span>` +
     `<span class="where">${grouped ? "" : `${escapeHtml(a.site.name)} · `}<span class="path">${escapeHtml(a.path)}</span></span>` +
     // Each part stays whole, so a narrow screen breaks the line between parts, not inside one.
-    `<span class="counts">${countLine(a)
-      .split(" · ")
-      .map((p) => `<span class="part">${escapeHtml(p)}</span>`)
-      .join(" · ")}</span>` +
+    `<span class="counts">${parts.join(" · ")}</span>` +
     `</span>` +
     chipHtml(chipFor(a)) +
     `<span class="chev">${CHEVRON}</span>` +
@@ -76,11 +106,18 @@ function rowHtml(a: MeAssignment, grouped = false): string {
 
 const firstName = (name: string) => name.trim().split(/\s+/)[0] ?? "";
 
-export function renderReviewer(data: MeResponse): string {
+/** `waiting`: unsent comments the overlay reported (offline mode), shown as a line and per row. */
+export function renderReviewer(data: MeResponse, waiting: WaitingBySite = {}): string {
   const first = firstName(data.name);
+  const total = data.assignments.reduce((n, a) => n + waitingFor(waiting, a), 0);
   const head =
     `<h1 class="hello">${first ? `Hi ${escapeHtml(first)}.` : "Hi."}</h1>` +
-    `<p class="lede">Tap a page to open it. Then tap Comment, and tap anything that should change.</p>`;
+    `<p class="lede">Tap a page to open it. Then tap Comment, and tap anything that should change.</p>` +
+    // The dashboard can't send them (they live with each site on the phone): it says how they go.
+    (total
+      ? `<div class="wait" data-waiting-line>${PHONE}<div><b>${plural(total, "comment", "comments")} waiting to send</b>` +
+        `<span>Saved on this phone. Open each page while you're online and they send.</span></div></div>`
+      : "");
   if (data.assignments.length === 0) return head + `<p class="empty">${MSG_EMPTY}</p>`;
 
   // Group by site, keeping the order sites first appear in.
@@ -90,14 +127,14 @@ export function renderReviewer(data: MeResponse): string {
     g.rows.push(a);
     groups.set(a.site.slug, g);
   }
-  if (groups.size === 1) return head + `<div class="list">${data.assignments.map((a) => rowHtml(a)).join("")}</div>`;
+  if (groups.size === 1) return head + `<div class="list">${data.assignments.map((a) => rowHtml(a, false, waitingFor(waiting, a))).join("")}</div>`;
   return (
     head +
     [...groups.values()]
       .map(
         (g) =>
           `<section><h2 class="site" data-site-heading>${escapeHtml(g.name)}</h2>` +
-          `<div class="list">${g.rows.map((a) => rowHtml(a, true)).join("")}</div></section>`,
+          `<div class="list">${g.rows.map((a) => rowHtml(a, true, waitingFor(waiting, a))).join("")}</div></section>`,
       )
       .join("")
   );
@@ -132,6 +169,11 @@ section + section { margin-top: 40px; }
 .part { white-space: nowrap; }
 .counts { font-size: 17px; line-height: 1.4; }
 .chev { grid-area: chev; color: var(--mut); line-height: 0; }
+.pend { font-weight: 600; color: var(--ink); }
+.wait { display: flex; gap: 12px; align-items: flex-start; margin: -8px 0 22px; max-width: 34em; }
+.wait svg { flex: none; margin-top: 2px; color: var(--ink); }
+.wait b { display: block; font-weight: 600; font-size: 18px; line-height: 1.35; }
+.wait span { display: block; font-size: 17px; line-height: 1.45; color: var(--mut); }
 .chip {
   grid-area: chip; justify-self: start; margin-top: 10px;
   display: inline-flex; align-items: center; gap: 6px;
@@ -176,6 +218,15 @@ export async function mountReviewer(win: Window): Promise<void> {
     main.innerHTML = `<p class="notice">${MSG_REVOKED}</p>`;
     return;
   }
+  const waiting = readWaiting(win);
+  // The report has been kept; a saved link (or a reload) should not carry it again.
+  if (stripWaiting(win.location.hash) !== win.location.hash) {
+    try {
+      win.history.replaceState(null, "", win.location.pathname + win.location.search + stripWaiting(win.location.hash));
+    } catch {
+      /* not fatal */
+    }
+  }
   // Keep a working link in the address bar so "Add to Home Screen" saves one.
   if (!/(?:^#|&)ttf=/.test(win.location.hash)) {
     try {
@@ -202,7 +253,7 @@ export async function mountReviewer(win: Window): Promise<void> {
     main.innerHTML = '<p class="notice muted">Loading…</p>';
     const res = await api<MeResponse>(token, "/api/me");
     if (res.ok) {
-      main.innerHTML = renderReviewer(res.data);
+      main.innerHTML = renderReviewer(res.data, waiting);
       return;
     }
     if (res.status === 401 || res.status === 403) {
