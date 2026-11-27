@@ -1,5 +1,15 @@
 import { fetchPageComments, postComment, type PageComment } from "./api";
-import { describeElement, findPin, locatorFor, type Locator } from "./locate";
+import {
+  deepElementFromPoint,
+  describeElement,
+  findPin,
+  FRAME_SEP,
+  frameDoc,
+  locatorFor,
+  toTopPoint,
+  topRect,
+  type Locator,
+} from "./locate";
 import { takeScreenshot } from "./shot";
 import { readMode, saveMode, type Mode } from "./mode";
 import { isSettled, OverlayUI, type PinView } from "./ui";
@@ -151,7 +161,7 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       const n = comments.length + 1;
       draft = {
         n,
-        locator: locatorFor(target, clientX, clientY),
+        locator: locatorFor(target, clientX, clientY, doc),
         shot: takeScreenshot({ x: clientX, y: clientY, n }, ui.host),
         viewport_w: win.innerWidth,
         viewport_h: win.innerHeight,
@@ -219,10 +229,21 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     };
 
     const inOverlay = (e: Event) => e.composedPath().includes(ui.host);
+    // nodeType, not instanceof: a node inside a frame belongs to the frame's window, whose
+    // Element is a different constructor from this window's.
+    const isEl = (n: unknown): n is Element => !!n && (n as Node).nodeType === 1;
     const targetOf = (e: Event): Element => {
       const first = e.composedPath()[0];
-      return first instanceof Element ? first : e.target instanceof Element ? e.target : doc.body;
+      return isEl(first) ? first : isEl(e.target) ? e.target : doc.body;
     };
+    /** The document an event happened in: this page, or a same-origin frame's page. */
+    const docOf = (e: Event): Document => {
+      const n = (e.composedPath()[0] ?? e.target) as Node | null;
+      if (!n) return doc;
+      return n.nodeType === 9 ? (n as Document) : (n.ownerDocument ?? doc);
+    };
+    /** The event's point in this page's viewport (a frame's clientX/Y are relative to the frame). */
+    const pointOf = (e: MouseEvent): { x: number; y: number } => toTopPoint(docOf(e), doc, e.clientX, e.clientY);
     const hide = (e: Event) => {
       e.stopPropagation();
       e.stopImmediatePropagation();
@@ -235,7 +256,8 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     const onPointerDown = (e: PointerEvent) => {
       if (mode === "use" || inOverlay(e)) return;
       hide(e); // never preventDefault here: the page must still scroll
-      down = e.isPrimary && e.button <= 0 ? { id: e.pointerId, x: e.clientX, y: e.clientY, t: e.timeStamp, target: targetOf(e) } : null;
+      const at = pointOf(e);
+      down = e.isPrimary && e.button <= 0 ? { id: e.pointerId, x: at.x, y: at.y, t: e.timeStamp, target: targetOf(e) } : null;
     };
     const onPointerUp = (e: PointerEvent) => {
       if (mode === "use" || inOverlay(e)) return;
@@ -244,7 +266,8 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       const d = down;
       down = null;
       if (!d || d.id !== e.pointerId) return;
-      if (Math.hypot(e.clientX - d.x, e.clientY - d.y) > TAP_SLOP_PX || e.timeStamp - d.t > TAP_MS) return;
+      const at = pointOf(e);
+      if (Math.hypot(at.x - d.x, at.y - d.y) > TAP_SLOP_PX || e.timeStamp - d.t > TAP_MS) return;
       tap(d.target, d.x, d.y);
     };
     const onPointerCancel = () => {
@@ -258,9 +281,9 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       if (e.timeStamp - lastPointerUp < CLICK_AFTER_POINTER_MS) return; // the pointer already decided
       // A click with no pointer behind it: keyboard activation, or a script's click().
       const target = targetOf(e);
-      let { clientX, clientY } = e;
-      if (e.detail === 0 && clientX === 0 && clientY === 0) {
-        const r = target.getBoundingClientRect();
+      let { x: clientX, y: clientY } = pointOf(e);
+      if (e.detail === 0 && e.clientX === 0 && e.clientY === 0) {
+        const r = topRect(target, doc);
         clientX = r.left + r.width / 2;
         clientY = r.top + r.height / 2;
       }
@@ -284,14 +307,16 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     let moveQueued = false;
     let rehit = false;
     // The page itself is never worth outlining; a margin hit means "nothing in particular".
-    const ringable = (t: Element | null): Element | null => (t && t !== doc.body && t !== doc.documentElement ? t : null);
+    // A frame's own body counts as the page too.
+    const ringable = (t: Element | null): Element | null =>
+      t && t !== t.ownerDocument.body && t !== t.ownerDocument.documentElement ? t : null;
     const paintCursor = () => {
       moveQueued = false;
       if (!alive || !moveAt) return;
       if (rehit) {
         // The page scrolled under a still mouse: whatever is under the pointer now gets the ring.
         rehit = false;
-        const hit = doc.elementFromPoint(moveAt.x, moveAt.y);
+        const hit = deepElementFromPoint(doc, moveAt.x, moveAt.y);
         moveAt.target = hit && hit !== ui.host && !ui.host.contains(hit) ? hit : null;
       }
       if (mode !== "comment" || ui.sheetOpen) ui.hideCursor();
@@ -308,7 +333,8 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
         ui.hideCursor();
         return;
       }
-      moveAt = { x: e.clientX, y: e.clientY, target: targetOf(e) };
+      const at = pointOf(e);
+      moveAt = { x: at.x, y: at.y, target: targetOf(e) };
       queueCursor();
     };
     const onPointerLeave = () => {
@@ -320,25 +346,26 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
     updateBar();
     render();
     const capture = { capture: true };
-    listen(doc, "pointerdown", onPointerDown, capture);
-    listen(doc, "pointerup", onPointerUp, capture);
-    listen(doc, "pointercancel", onPointerCancel, capture);
-    listen(doc, "click", onClick, capture);
-    for (const type of ["touchstart", "touchend"]) listen(doc, type, onOtherInput, { capture: true, passive: true });
-    for (const type of ["mousedown", "mouseup"]) listen(doc, type, onOtherInput, capture);
-    listen(doc, "keydown", onKey, capture);
-    listen(doc, "pointermove", onPointerMove, { capture: true, passive: true });
-    listen(doc.documentElement, "pointerleave", onPointerLeave);
-    listen(
-      win,
-      "scroll",
-      () => {
-        if (!moveAt) return;
-        rehit = true;
-        queueCursor();
-      },
-      { capture: true, passive: true },
-    );
+    const onScroll = () => {
+      if (!moveAt) return;
+      rehit = true;
+      queueCursor();
+    };
+    /** The same capture-phase listeners on this page and on every same-origin frame's page. */
+    const inputOn = (d: Document) => {
+      listen(d, "pointerdown", onPointerDown, capture);
+      listen(d, "pointerup", onPointerUp, capture);
+      listen(d, "pointercancel", onPointerCancel, capture);
+      listen(d, "click", onClick, capture);
+      for (const type of ["touchstart", "touchend"]) listen(d, type, onOtherInput, { capture: true, passive: true });
+      for (const type of ["mousedown", "mouseup"]) listen(d, type, onOtherInput, capture);
+      listen(d, "keydown", onKey, capture);
+      listen(d, "pointermove", onPointerMove, { capture: true, passive: true });
+      listen(d.documentElement, "pointerleave", onPointerLeave);
+      const w = d.defaultView;
+      if (w) listen(w, "scroll", onScroll, { capture: true, passive: true });
+    };
+    inputOn(doc);
     // Sites with a fixed or sticky bar along the bottom edge (a cookie banner): sit above it.
     const placeBar = () => {
       if (!alive) return;
@@ -391,8 +418,53 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
       ro.observe(doc.body);
       cleanup.push(() => ro.disconnect());
     }
-    // A banner that appears or hides later changes the page, not the window.
-    const mo = new MutationObserver(scheduleLift);
+    // Same-origin frames (an article shown in <iframe srcdoc>) get the same listeners. A frame's
+    // load replaces its document, so each load attaches to the new one; cross-origin frames are
+    // skipped (frameDoc gives null).
+    const framesSeen = new WeakSet<Element>();
+    const docsSeen = new WeakSet<Document>();
+    const attachDoc = (d: Document) => {
+      if (docsSeen.has(d) || !alive) return;
+      docsSeen.add(d);
+      try {
+        inputOn(d);
+      } catch {
+        return; // the frame went away or turned cross-origin under us
+      }
+      if (d.body) {
+        const inner = new MutationObserver(() => watchFramesIn(d));
+        inner.observe(d.body, { childList: true, subtree: true });
+        cleanup.push(() => inner.disconnect());
+      }
+      watchFramesIn(d);
+    };
+    // A pin that sits in a frame, or that could not be found yet, may land once a frame loads.
+    const mayNeedFrame = () =>
+      comments.some((c) => c.selector?.includes(FRAME_SEP)) || placed.some((p) => p.moved) || placed.length < comments.length;
+    const watchFrame = (f: Element) => {
+      // The screenshot library adds its own hidden frame while it captures; leave it alone.
+      if (f.id.startsWith("__SANDBOX__")) return;
+      if (!framesSeen.has(f)) {
+        framesSeen.add(f);
+        listen(f, "load", () => {
+          const d = frameDoc(f);
+          if (d) attachDoc(d);
+          if (mayNeedFrame()) schedule();
+        });
+      }
+      const d = frameDoc(f);
+      if (d) attachDoc(d);
+    };
+    const watchFramesIn = (d: Document) => {
+      for (const f of Array.from(d.querySelectorAll("iframe, frame"))) watchFrame(f);
+    };
+    watchFramesIn(doc);
+    // A banner that appears or hides later changes the page, not the window; a frame added
+    // later needs its listeners.
+    const mo = new MutationObserver(() => {
+      scheduleLift();
+      watchFramesIn(doc);
+    });
     mo.observe(doc.body, { childList: true, attributes: true, subtree: true });
     cleanup.push(() => mo.disconnect());
   }

@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Fixture frame</title>
+  <script src="http://localhost:8788/t.js" data-site="fixture" defer></script>
+</head>
+<body style="margin: 0">
+  <!-- An article shown in <iframe srcdoc>, the way greensprings.life embeds a finished page:
+       no sandbox (same origin as this page), sized to its content so only this page scrolls. -->
+  <header style="height: 90px">Fixture site header</header>
+  <h1>A page with a framed article</h1>
+  <iframe id="story" title="Framed article" style="display: block; width: 100%; height: 600px; border: 3px solid #333; margin-left: 0"
+    srcdoc="<!doctype html><html><body style=&quot;margin: 16px; font: 18px sans-serif&quot;>
+      <h2 id=&quot;inner-title&quot;>Inside the frame</h2>
+      <p>A paragraph inside the framed article.</p>
+      <p><a id=&quot;inner-link&quot; href=&quot;/other.html&quot;>A link inside the frame</a></p>
+      <div id=&quot;swatch&quot; style=&quot;width: 200px; height: 120px; background: rgb(220, 20, 60)&quot;></div>
+      <p>The end of the framed article.</p>
+    </body></html>"></iframe>
+  <p id="after">After the frame.</p>
+  <script>
+    const fit = (f) => { f.style.height = f.contentDocument.documentElement.scrollHeight + "px"; };
+    const story = document.getElementById("story");
+    story.addEventListener("load", () => fit(story));
+    if (story.contentDocument && story.contentDocument.readyState === "complete") fit(story);
+  </script>
+</body>
+</html>

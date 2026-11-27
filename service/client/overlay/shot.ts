@@ -1,6 +1,6 @@
 import { createContext, domToCanvas, loadMedia } from "modern-screenshot";
 import { PIN_BODY_CX, PIN_BODY_CY, PIN_FLIP_MARGIN, pinPath, type Dir } from "./pin-shape";
-import { shrinkToFit, targetSize } from "./locate";
+import { frameDocs, shrinkToFit, targetSize, topRect } from "./locate";
 
 const MAX_BYTES = 1_000_000;
 const PLACEHOLDER =
@@ -25,15 +25,23 @@ export function skipForShot(rect: { top: number; bottom: number }, position: str
 
 // Waits for the images the reviewer can see, each at most IMG_WAIT_MS. A lazy image
 // below the fold would otherwise hold the whole capture up to the library's timeout.
+// Images inside same-origin frames count too, measured where they sit on this page.
 async function waitForVisibleImages(): Promise<void> {
-  const pending = Array.from(document.querySelectorAll("img")).filter((img) => {
+  const imgs = [document, ...frameDocs(document)].flatMap((d) => Array.from(d.querySelectorAll("img")));
+  const pending = imgs.filter((img) => {
     if (img.complete) return false;
-    const r = img.getBoundingClientRect();
+    const r = topRect(img, document);
     return r.bottom > 0 && r.top < window.innerHeight && r.right > 0 && r.left < window.innerWidth;
   });
   await Promise.all(pending.map((img) => loadMedia(img, { timeout: IMG_WAIT_MS }).catch(() => undefined)));
 }
 
+// Same-origin frames: the library clones a frame's own page in place of the <iframe> (its
+// cloneIframe), so their content is in the capture. A frame it cannot read (cross-origin)
+// comes out as an empty box; the capture still finishes. Nodes inside a frame belong to the
+// frame's window, so the filter checks nodeType rather than instanceof, and measures them on
+// this page (topRect) with the frame's own getComputedStyle.
+//
 // Crops by capturing only a viewport-sized window: width/height = viewport and the
 // cloned root is shifted by the scroll offset, so only the viewport is painted.
 // Scale follows the screen's pixel density, so a 390 px phone at 3x gives ~1170 px,
@@ -52,10 +60,11 @@ async function captureViewport(exclude: Element): Promise<HTMLCanvasElement> {
     // containers). Accepted: it keeps the capture under the Save deadline on long pages.
     filter: (n) => {
       if (n === exclude) return false;
-      if (n instanceof Element) {
-        return !skipForShot(n.getBoundingClientRect(), getComputedStyle(n).position, window.innerHeight);
-      }
-      return true;
+      if (n.nodeType !== 1) return true;
+      const el = n as Element;
+      const view = el.ownerDocument.defaultView ?? window;
+      const r = topRect(el, document);
+      return !skipForShot(r, view.getComputedStyle(el).position, window.innerHeight);
     },
     fetch: { placeholderImage: PLACEHOLDER },
     timeout: 1,

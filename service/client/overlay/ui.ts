@@ -2,6 +2,7 @@ import type { Status } from "./api";
 import { OVERLAY_CSS } from "./styles";
 import type { Mode } from "./mode";
 import { PIN_BODY_CX, PIN_BODY_CY, PIN_FLIP_MARGIN, pinPath, type Dir } from "./pin-shape";
+import { topRect } from "./locate";
 
 export const STATUS_LABELS: Record<Status, string> = {
   open: "Open",
@@ -91,6 +92,8 @@ export class OverlayUI {
   private mode: Mode = "use";
   private readonly cursor: HTMLDivElement;
   private readonly ring: HTMLDivElement;
+  /** Documents (this page and same-origin frames) carrying the hide-the-arrow style. */
+  private readonly arrowHidden = new Set<Document>();
 
   constructor(private readonly doc: Document, private readonly dashboardUrl: string) {
     this.host = doc.createElement("tap-to-fix-overlay");
@@ -189,12 +192,13 @@ export class OverlayUI {
     }
   }
 
-  /** Puts the Comment cursor at (x, y), the ring around `target`, and hides the arrow cursor. */
+  /** Puts the Comment cursor at (x, y), the ring around `target`, and hides the arrow cursor.
+   *  (x, y) is in this page's viewport; `target` may be inside a same-origin frame. */
   moveCursor(x: number, y: number, target: Element | null): void {
     this.cursor.hidden = false;
     this.cursor.style.transform = `translate(${x}px, ${y}px)`;
     if (target && target.isConnected) {
-      const r = target.getBoundingClientRect();
+      const r = topRect(target, this.doc);
       this.ring.hidden = false;
       this.ring.style.width = `${r.width + 6}px`;
       this.ring.style.height = `${r.height + 6}px`;
@@ -202,18 +206,26 @@ export class OverlayUI {
     } else {
       this.ring.hidden = true;
     }
-    if (!this.doc.getElementById(CURSOR_STYLE_ID)) {
-      const s = this.doc.createElement("style");
-      s.id = CURSOR_STYLE_ID;
-      s.textContent = "html, html * { cursor: none !important; }";
-      this.doc.head.append(s);
-    }
+    // Hide the arrow on this page and, when the mouse is over a frame, inside that frame's page.
+    this.hideArrow(this.doc);
+    if (target && target.ownerDocument !== this.doc) this.hideArrow(target.ownerDocument);
+  }
+
+  private hideArrow(d: Document): void {
+    if (d.getElementById(CURSOR_STYLE_ID) || !d.head) return;
+    const s = d.createElement("style");
+    s.id = CURSOR_STYLE_ID;
+    s.textContent = "html, html * { cursor: none !important; }";
+    d.head.append(s);
+    this.arrowHidden.add(d);
   }
 
   hideCursor(): void {
     this.cursor.hidden = true;
     this.ring.hidden = true;
     this.doc.getElementById(CURSOR_STYLE_ID)?.remove();
+    for (const d of this.arrowHidden) d.getElementById(CURSOR_STYLE_ID)?.remove();
+    this.arrowHidden.clear();
   }
 
   /** Raises the pill so its bottom edge is `px` above the viewport bottom; null puts it back. */
