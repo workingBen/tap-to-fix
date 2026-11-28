@@ -44,6 +44,13 @@ code, pre { font-family: var(--mono); }
 .note { position: absolute; left: -116px; top: 58px; width: 220px; padding: 16px 18px; border-radius: 18px; background: var(--orange); color: #fff;
   transform: rotate(-8deg); box-shadow: 0 16px 36px rgba(0, 0, 0, .4); font: 700 20px/1.2 var(--sans); }
 .note small { display: block; margin-bottom: 10px; font: 700 12px/1 var(--mono); letter-spacing: .06em; opacity: .75; }
+/* Hero video: the approved silent loop, full width under the two columns. Reduced motion shows the poster (see the script). */
+.hero-video { grid-column: 1 / -1; position: relative; margin: 24px 0 0; }
+.hero-video video, .hero-video img { display: block; width: 100%; height: auto; aspect-ratio: 16 / 9; border-radius: 18px;
+  background: #18221d; border: 1px solid rgba(127, 211, 168, .35); box-shadow: 0 24px 60px rgba(0, 0, 0, .35); }
+.video-pause { position: absolute; right: 14px; bottom: 14px; font: 600 15px/1 var(--sans); padding: 9px 16px; border-radius: 999px; cursor: pointer;
+  background: rgba(0, 0, 0, .55); color: #fff; border: 1.5px solid rgba(255, 255, 255, .5); }
+.video-pause:focus-visible { outline: 3px solid var(--mint); outline-offset: 2px; }
 
 .phone { border: 9px solid #0d1a14; border-radius: 38px; overflow: hidden; background: #000; box-shadow: 0 24px 60px rgba(0, 0, 0, .3); }
 
@@ -149,6 +156,9 @@ footer .wrap { display: flex; flex-wrap: wrap; gap: 8px 24px; justify-content: s
   .hero .wrap { padding-top: 48px; padding-bottom: 64px; }
   .hero .ph { width: 240px; margin-top: 12px; }
   .note { left: -84px; top: 4px; width: 170px; font-size: 16px; }
+  .hero-video { margin-top: 20px; }
+  .hero-video video, .hero-video img { border-radius: 12px; }
+  .video-pause { right: 8px; bottom: 8px; padding: 7px 12px; font-size: 13px; }
   .steps { grid-template-columns: 1fr; gap: 56px; }
   section.band { padding: 64px 0; }
 }
