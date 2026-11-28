@@ -12,7 +12,7 @@
 <p align="center"><b>Your reviewers tap the live site on their phone and say what to fix.<br>Claude Code fixes each comment and tells them when it's done.</b></p>
 
 <p align="center">
-  <img src="docs/assets/how-it-works.jpg" alt="Three steps on phones: 1, a reviewer taps the “Book your assessment” button on the live page and asks “Should this button be full width on mobile?”; 2, the owner dashboard shows the command /tap-to-fix:fix alexis greensprings; 3, the reviewer's list shows the page as updated and done." width="100%">
+  <img src="docs/assets/how-it-works.jpg" alt="Three steps on phones: 1, a reviewer taps the “Book your assessment” button on the live page and asks “Should this button be full width on mobile?”; 2, the owner dashboard's Ready to fix list shows the command /tap-to-fix:fix alexis greensprings with a Copy button; 3, the reviewer's list opens with a “Since you last looked” notice: Virtual EMF Assessment, 2 fixed, and a Got it button." width="100%">
 </p>
 
 <p align="center"><a href="https://workingben.github.io/tap-to-fix/"><b>See the site</b></a> · <a href="#quickstart"><b>Install</b></a></p>
@@ -27,7 +27,7 @@ It was built for [Greensprings Longevity](https://greensprings.life) and its Bon
 
 1. **A reviewer taps.** You give each reviewer a private link. It opens their list of pages to review. On a page, they tap a spot, type what should change, and save.
 2. **The comment is saved with a screenshot.** The browser takes a screenshot of what the reviewer sees, marks the tapped spot, and shrinks it before upload. The service stores the comment, the screenshot, the page, and enough about the element to find it again after the page changes.
-3. **You see it on the owner dashboard.** It lists your reviewers, the pages assigned to each, and how many comments are waiting. For each reviewer with open comments it shows the command to run.
+3. **You see it on the owner dashboard.** A **Ready to fix** list at the top shows each reviewer with open comments and the command to run. Below it are your reviewers, the pages assigned to each, and how many comments are waiting.
 4. **Claude Code fixes them.** In your site's repo, run `/tap-to-fix:fix <reviewer> <site>`. It downloads that reviewer's comments and screenshots and runs them as a [proofs](https://github.com/workingBen/proofs) review cycle. Each comment is marked in progress when work on it starts, and done with its pull request link after merge.
 5. **The reviewer sees the status.** Their list puts new pages first, then pages updated since they last looked. A short notice at the top says how many comments were fixed on which pages, until they tap **Got it**.
 
@@ -158,9 +158,11 @@ The owner creates a reviewer and assigns pages (a path on a site). The reviewer'
 
 Without a token, nothing appears. On a page not assigned to the reviewer, the bar says "This page isn't on your review list", and every tap goes through to the page as usual. On sites that swap pages without a full reload (Turbo Drive, other routers), the comment layer follows along on `turbo:load`, `popstate` and `pageshow`.
 
+The comment layer also works inside same-origin iframes, such as an article shown in `<iframe srcdoc>`: taps, pins and screenshots reach the framed page. Cross-origin frames are skipped. If the site has a sticky header, pins slide under it as the page scrolls, like the page's own content; pins on the header itself stay visible.
+
 ## Dashboards
 
-**Owner (`/o/`).** Open `https://YOUR-SERVICE-ORIGIN/o/#owner=OWNER_TOKEN` once. The page saves the token in `localStorage`, removes it from the address bar, and shows your reviewers, pages and sites. On a later visit, `/o/` alone works from the same browser. If the token is missing or wrong, the page asks you to paste it. From there you add sites, reviewers and assigned pages, and copy each "ready for a review cycle" command (`/tap-to-fix:fix <first name> <site slug>`). Each reviewer has **Copy link**, **Text link** (opens a new text message with the link in it), **New link** and **Turn off link**. The link is fetched only when you tap, and only the owner can fetch it. Reviewers added before links were kept show a note asking for **New link** once.
+**Owner (`/o/`).** Open `https://YOUR-SERVICE-ORIGIN/o/#owner=OWNER_TOKEN` once. The page saves the token in `localStorage`, removes it from the address bar, and shows your reviewers, pages and sites. On a later visit, `/o/` alone works from the same browser. If the token is missing or wrong, the page asks you to paste it. From there you add sites, reviewers and assigned pages, and copy each reviewer's command from the **Ready to fix** list at the top (`/tap-to-fix:fix <first name> <site slug>`). Each assigned page has **Page**, which opens the live page, and **Review**, which opens it with the comment layer on, as that reviewer. **Review** is grayed out while that reviewer's link is off. Each reviewer has **Copy link**, **Text link** (opens a new text message with the link in it), **New link** and **Turn off link**. The link is fetched only when you tap, and only the owner can fetch it. Reviewers added before links were kept show a note asking for **New link** once.
 
 **Reviewer (`/r/`).** The reviewer's link is `https://YOUR-SERVICE-ORIGIN/r/#ttf=THEIR_TOKEN`. It opens their list of pages in sections: **New** (never opened), **Updated since you looked**, **Looked at**, and a closed **Finished** list at the bottom. An icon on each row shows where its comments stand: a gray outline bubble (no comments yet), an amber bubble (comments waiting), a green pie (some settled) or a green check (all done). Above the list, **Since you last looked** names each page with comments fixed since the reviewer last tapped **Got it**, and how many; a finished page stays in Finished and the notice names it. The **⋯** on a row opens **Review complete** (moves the page to Finished) and **Open the page**; a finished page has **Re-review** to bring it back. Tapping a page opens the live site with the comment layer on. The token stays in the address bar so the page can be added to a phone's home screen. **New link** makes the old one stop working.
 
