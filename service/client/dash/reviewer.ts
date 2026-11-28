@@ -2,7 +2,7 @@
 // Pure view functions (data in, HTML out) plus a thin mount layer that talks to the API.
 import { api, escapeHtml, readToken } from "./common";
 import { DASH_CSS } from "./dash.css";
-import { decodeWaiting, mergeWaiting, stripWaiting, type WaitingBySite } from "../handoff";
+import { decodeWaiting, forgetSent, mergeWaiting, stripWaiting, type WaitingBySite } from "../handoff";
 
 export type MeAssignment = {
   id: string;
@@ -30,7 +30,7 @@ export type Section = "new" | "updated" | "seen" | "finished";
 export type RowState = "none" | "waiting" | "some" | "done";
 
 export const STORAGE_KEY = "ttf:dash-token";
-/** Comments waiting to send on each site, as the overlay's Done link last reported them. */
+/** Comments waiting to send on each site (client ids), as the overlay's Done link last reported them. */
 export const WAITING_KEY = "ttf:waiting";
 const OPENED_WAIT_MS = 1500;
 
@@ -77,24 +77,59 @@ export function readWaiting(win: Window): WaitingBySite {
   let known: WaitingBySite = {};
   try {
     const raw = JSON.parse(win.localStorage.getItem(WAITING_KEY) ?? "{}") as unknown;
-    if (raw && typeof raw === "object" && !Array.isArray(raw)) known = raw as WaitingBySite;
+    if (raw && typeof raw === "object" && !Array.isArray(raw)) known = keepIds(raw as Record<string, unknown>);
   } catch {
     known = {};
   }
   const report = decodeWaiting(win.location.hash);
   if (!report) return known;
   known = mergeWaiting(known, report);
+  saveWaiting(win, known);
+  return known;
+}
+
+/** Only lists of ids survive: a bare count (kept before ids) can never be checked off. */
+function keepIds(raw: Record<string, unknown>): WaitingBySite {
+  const out: WaitingBySite = {};
+  for (const [site, pages] of Object.entries(raw)) {
+    if (!pages || typeof pages !== "object") continue;
+    for (const [path, ids] of Object.entries(pages as Record<string, unknown>)) {
+      if (!Array.isArray(ids)) continue;
+      const kept = ids.filter((id): id is string => typeof id === "string");
+      if (kept.length) (out[site] ??= {})[path] = kept;
+    }
+  }
+  return out;
+}
+
+function saveWaiting(win: Window, known: WaitingBySite): void {
   try {
     win.localStorage.setItem(WAITING_KEY, JSON.stringify(known));
   } catch {
     /* storage blocked: the counts still show for this visit */
   }
-  return known;
+}
+
+/**
+ * Asks the service which waiting comments have arrived since the Done link reported them: each
+ * sends when its page is next opened online, and that page never reports back here. One request
+ * per page with something waiting; a page that can't be checked keeps its count.
+ */
+export async function checkSent(token: string, known: WaitingBySite, assignments: MeAssignment[]): Promise<WaitingBySite> {
+  let next = known;
+  for (const a of assignments) {
+    if (!known[a.site.slug]?.[a.path]?.length) continue;
+    const q = `site=${encodeURIComponent(a.site.slug)}&path=${encodeURIComponent(a.path)}`;
+    const res = await api<{ comments: { client_id: string | null }[] }>(token, `/api/me/pages/comments?${q}`);
+    if (!res.ok) continue;
+    const onServer = new Set(res.data.comments.map((c) => c.client_id).filter((id): id is string => !!id));
+    next = forgetSent(next, a.site.slug, a.path, onServer);
+  }
+  return next;
 }
 
 const waitingFor = (w: WaitingBySite, a: MeAssignment): number => {
-  const n = w[a.site.slug]?.[a.path];
-  return typeof n === "number" && n > 0 ? n : 0;
+  return w[a.site.slug]?.[a.path]?.length ?? 0;
 };
 
 const PHONE =
@@ -393,7 +428,7 @@ export async function mountReviewer(win: Window): Promise<void> {
     main.innerHTML = `<p class="notice">${MSG_REVOKED}</p>`;
     return;
   }
-  const waiting = readWaiting(win);
+  let waiting = readWaiting(win);
   // The report has been kept; a saved link (or a reload) should not carry it again.
   if (stripWaiting(win.location.hash) !== win.location.hash) {
     try {
@@ -529,6 +564,12 @@ export async function mountReviewer(win: Window): Promise<void> {
     if (res.ok) {
       data = res.data;
       render();
+      const checked = await checkSent(token, waiting, data.assignments);
+      if (checked !== waiting) {
+        waiting = checked;
+        saveWaiting(win, waiting);
+        render();
+      }
       return;
     }
     if (res.status === 401 || res.status === 403) {

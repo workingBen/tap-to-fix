@@ -211,3 +211,27 @@ test("Done hands the waiting count to the dashboard, which clears it once they a
   await expect(page.locator("[data-waiting-line]")).toHaveCount(0);
   await expect(page.locator("a[data-assignment] [data-waiting]")).toHaveCount(0);
 });
+
+test("a dashboard reached without Done still drops comments that have since sent", async ({ page, context }) => {
+  const r = await freshReviewer("Came back another way");
+  await open(page, r.token);
+  await context.setOffline(true);
+  await comment(page, "h1", "One");
+  await expect(line(page)).toHaveText("Offline · 1 waiting to send", { timeout: 6_000 });
+  const href = (await overlay(page).getByRole("link", { name: "Done" }).getAttribute("href"))!;
+
+  await page.route("**/api/me/comments", (route) => route.abort());
+  await context.setOffline(false);
+  await page.goto(href);
+  await expect(page.locator("[data-waiting-line]")).toContainText("1 comment waiting to send");
+
+  // The page sends it, but the reviewer comes back by the Back button or a home-screen icon.
+  await page.unroute("**/api/me/comments");
+  await page.locator("a[data-assignment]").tap();
+  await expect(overlay(page).locator("[data-ttf=pin].unsent")).toHaveCount(0);
+  await expect(pins(page)).toHaveCount(1);
+  await page.goto(`${SERVICE}/r/#ttf=${r.token}`);
+  await expect(page.locator("a[data-assignment]")).toBeVisible();
+  await expect(page.locator("[data-waiting-line]")).toHaveCount(0);
+  await expect(page.locator("a[data-assignment] [data-waiting]")).toHaveCount(0);
+});
