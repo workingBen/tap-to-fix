@@ -143,6 +143,8 @@ export class OverlayUI {
   onPinTap: (n: number) => void = () => {};
   onModeChange: (m: Mode) => void = () => {};
   onLineTap: (state: LineState) => void = () => {};
+  /** Asked when Done (or Back to your list) is tapped: the list is on another site and can't load offline. */
+  doneOffline: () => { offline: boolean; waiting: number } = () => ({ offline: false, waiting: 0 });
   private mode: Mode = "use";
   private readonly cursor: HTMLDivElement;
   private readonly ring: HTMLDivElement;
@@ -194,7 +196,16 @@ export class OverlayUI {
   }
 
   setBar(state: BarState): void {
-    const link = (text: string) => el("a", { href: this.dashboardHref, "data-ttf": "dash-link" }, text);
+    const link = (text: string) => {
+      const a = el("a", { href: this.dashboardHref, "data-ttf": "dash-link" }, text);
+      a.addEventListener("click", (ev) => {
+        const { offline, waiting } = this.doneOffline();
+        if (!offline) return;
+        ev.preventDefault();
+        this.openDoneOffline(waiting);
+      });
+      return a;
+    };
     const warn = (text: string) => el("span", { class: "msg" }, icon(ALERT_ICON), text);
     let content: Node[];
     switch (state.kind) {
@@ -498,6 +509,26 @@ export class OverlayUI {
         el("h2", { class: "sheet-h", id: "ttf-sheet-h" }, "You're offline"),
         el("p", { class: "lede ink" }, "Keep commenting. Each comment and its screenshot is saved on this phone."),
         el("p", { class: "lede" }, "They send on their own when you're back online with a Tap to Fix page open."),
+        el("div", { class: "actions" }, ok),
+      ],
+      null,
+    );
+    ok.focus({ preventScroll: true });
+  }
+
+  /** Done tapped with no connection: the review list lives on the service and can't load, so stay here. */
+  openDoneOffline(waiting: number): void {
+    const ok = el("button", { type: "button", class: "btn primary" }, "OK");
+    ok.addEventListener("click", () => this.closeSheet());
+    const saved =
+      waiting === 0
+        ? "Nothing is waiting to send."
+        : `Your ${waiting === 1 ? "1 comment is" : `${waiting} comments are`} saved on this phone.`;
+    this.show(
+      [
+        el("h2", { class: "sheet-h", id: "ttf-sheet-h" }, "Your review list needs a connection"),
+        el("p", { class: "lede ink" }, saved + " You can keep commenting here."),
+        el("p", { class: "lede" }, "When you're back online, tap Done again."),
         el("div", { class: "actions" }, ok),
       ],
       null,

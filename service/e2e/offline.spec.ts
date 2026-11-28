@@ -235,3 +235,23 @@ test("a dashboard reached without Done still drops comments that have since sent
   await expect(page.locator("[data-waiting-line]")).toHaveCount(0);
   await expect(page.locator("a[data-assignment] [data-waiting]")).toHaveCount(0);
 });
+
+test("Done while offline stays on the page and says why, instead of a browser error", async ({ page, context }) => {
+  const r = await freshReviewer("Done offline");
+  await open(page, r.token);
+  await context.setOffline(true);
+  await comment(page, "h1", "One");
+  await expect(line(page)).toHaveText("Offline · 1 waiting to send", { timeout: 6_000 });
+  const here = page.url();
+  await overlay(page).getByRole("link", { name: "Done" }).tap();
+  await expect(sheet(page)).toContainText("Your review list needs a connection");
+  await expect(sheet(page)).toContainText("Your 1 comment is saved on this phone.");
+  expect(page.url()).toBe(here);
+  await sheet(page).getByRole("button", { name: "OK" }).tap();
+  await expect(sheet(page)).toBeHidden();
+
+  // Back online, Done goes to the list as before.
+  await context.setOffline(false);
+  await overlay(page).getByRole("link", { name: "Done" }).tap();
+  await expect(page).toHaveURL(new RegExp(`/r/#ttf=${r.token}`));
+});
