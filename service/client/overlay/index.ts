@@ -301,6 +301,10 @@ function session(config: OverlayConfig, doc: Document, win: Window): Session {
         return ok;
       }
     };
+    ui.doneOffline = () => ({
+      offline: win.navigator.onLine === false || outbox.view().offline,
+      waiting: outbox.view().waiting.length,
+    });
     ui.onLineTap = (state) => {
       if (draft) return;
       if (state.kind === "offline") ui.openOffline();
