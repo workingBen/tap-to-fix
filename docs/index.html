@@ -39,6 +39,10 @@
       <div class="phone"><img src="assets/pinned.jpg" width="585" height="1266" alt="A live page on a phone with a numbered pin on its “Book your assessment” button, and the Tap to Fix bar at the bottom: Comment, Use the page, Done."></div>
       <div class="note" aria-hidden="true"><small>NOTE 1</small>Should this button be full width on mobile?</div>
     </div>
+    <figure class="hero-video">
+      <video autoplay muted loop playsinline preload="metadata" width="1600" height="900" poster="assets/hero-poster.png" aria-label="A looping demo on a phone. Before: “Your reviewer sees something wrong.” A Greensprings Longevity page, Virtual EMF Assessment, shows a still bedroom photo with six numbered spots. “They tap the spot. And say what to fix.” The reviewer, Alexis, taps the photo and types “Can this be a slow video around the room?” After: “The AI fixed it. Exactly as they asked.” The photo is now a slow moving tour of the room, with labels on the bedside lamp, the outlet behind the bed and the wall wiring. “You check and merge.” Pull request #731, “A slow video around the room”, shows before and after pictures, Checked, and a Merged stamp. It ends on a Done check."><source src="assets/hero.mp4" type="video/mp4"><img src="assets/hero.gif" width="1040" height="585" alt="A reviewer taps a bedroom photo on a phone and asks “Can this be a slow video around the room?”; the AI turns it into a slow room tour with labeled sources, you check and merge the pull request, and it ends on Done."></video>
+      <button class="video-pause" type="button" aria-pressed="false">Pause</button>
+    </figure>
   </div>
 </header>
 
@@ -160,6 +164,16 @@
       b.setAttribute('aria-pressed', String(paused));
       b.textContent = paused ? 'Play' : 'Pause';
     });
+  });
+  // Hero video: a Pause/Play button, and no autoplay for reduced motion (the poster shows until Play).
+  document.querySelectorAll('.hero-video').forEach(function (fig) {
+    var v = fig.querySelector('video'), b = fig.querySelector('.video-pause');
+    if (!v || !b) return;
+    function sync() { b.textContent = v.paused ? 'Play' : 'Pause'; b.setAttribute('aria-pressed', String(v.paused)); }
+    var still = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)');
+    if (still && still.matches) { v.removeAttribute('autoplay'); v.pause(); v.load(); sync(); }
+    b.addEventListener('click', function () { if (v.paused) { v.play(); } else { v.pause(); } });
+    v.addEventListener('play', sync); v.addEventListener('pause', sync);
   });
 </script>
 </body>

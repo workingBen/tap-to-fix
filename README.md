@@ -12,10 +12,14 @@
 <p align="center"><b>Your reviewers tap the live site on their phone and say what to fix.<br>Claude Code fixes each comment and tells them when it's done.</b></p>
 
 <p align="center">
-  <img src="docs/assets/how-it-works.jpg" alt="Three steps on phones: 1, a reviewer taps the “Book your assessment” button on the live page and asks “Should this button be full width on mobile?”; 2, the owner dashboard's Ready to fix list shows the command /tap-to-fix:fix alexis greensprings with a Copy button; 3, the reviewer's list opens with a “Since you last looked” notice: Virtual EMF Assessment, 2 fixed, and a Got it button." width="100%">
+  <img src="docs/assets/hero.gif" alt="A looping demo on a phone. Before: “Your reviewer sees something wrong.” A Greensprings Longevity page, Virtual EMF Assessment, shows a still bedroom photo with six numbered spots. “They tap the spot. And say what to fix.” The reviewer, Alexis, taps the photo and types “Can this be a slow video around the room?” After: “The AI fixed it. Exactly as they asked.” The photo is now a slow moving tour of the room, with labels on the bedside lamp, the outlet behind the bed and the wall wiring. “You check and merge.” Pull request #731, “A slow video around the room”, shows before and after pictures, Checked, and a Merged stamp. It ends on a Done check." width="100%">
 </p>
 
 <p align="center"><a href="https://workingben.github.io/tap-to-fix/"><b>See the site</b></a> · <a href="#quickstart"><b>Install</b></a></p>
+
+<p align="center">
+  <img src="docs/assets/how-it-works.jpg" alt="Three steps on phones: 1, a reviewer taps the “Book your assessment” button on the live page and asks “Should this button be full width on mobile?”; 2, the owner dashboard's Ready to fix list shows the command /tap-to-fix:fix alexis greensprings with a Copy button; 3, the reviewer's list opens with a “Since you last looked” notice: Virtual EMF Assessment, 2 fixed, and a Got it button." width="100%">
+</p>
 
 # tap-to-fix
 
