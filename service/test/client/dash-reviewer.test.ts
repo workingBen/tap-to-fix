@@ -14,6 +14,9 @@ import {
 } from "../../client/dash/reviewer";
 import { encodeWaiting } from "../../client/handoff";
 
+const ids = (n: number, from = 1) =>
+  Array.from({ length: n }, (_, i) => `00000000-0000-4000-8000-${String(from + i).padStart(12, "0")}`);
+
 function assignment(over: Partial<MeAssignment> = {}, counts: Partial<MeAssignment["counts"]> = {}): MeAssignment {
   return {
     id: "a1",
@@ -194,7 +197,7 @@ describe("waiting comments (offline mode's hand-off)", () => {
         name: "Ben",
         assignments: [assignment({}, { total: 1, open: 1 }), assignment({ id: "a2", path: "/cold", title: "Cold plunge" })],
       },
-      { "bonus-decade": { "/sauna": 2, "/cold": 1, "/not-mine": 4 } },
+      { "bonus-decade": { "/sauna": ids(2), "/cold": ids(1, 3), "/not-mine": ids(4, 4) } },
     );
     const doc = new DOMParser().parseFromString(html, "text/html");
     expect(doc.querySelector("[data-waiting-line] b")?.textContent).toBe("3 comments waiting to send");
@@ -204,7 +207,7 @@ describe("waiting comments (offline mode's hand-off)", () => {
     expect(rows).toEqual(["1 comment · 2 waiting to send", "1 waiting to send"]);
   });
   it("one waiting is singular, and nothing waiting shows no line", () => {
-    expect(text(renderReviewer({ name: "Ben", assignments: [assignment()] }, { "bonus-decade": { "/sauna": 1 } }))).toContain(
+    expect(text(renderReviewer({ name: "Ben", assignments: [assignment()] }, { "bonus-decade": { "/sauna": ids(1) } }))).toContain(
       "1 comment waiting to send",
     );
     const none = renderReviewer({ name: "Ben", assignments: [assignment()] }, {});
@@ -212,7 +215,7 @@ describe("waiting comments (offline mode's hand-off)", () => {
     expect(text(none)).toContain("No comments yet");
   });
   it("counts from another site's slug never land on this site's rows", () => {
-    const html = renderReviewer({ name: "Ben", assignments: [assignment()] }, { gl: { "/sauna": 5 } });
+    const html = renderReviewer({ name: "Ben", assignments: [assignment()] }, { gl: { "/sauna": ids(5) } });
     expect(html).not.toContain("waiting to send");
   });
 });
@@ -221,15 +224,22 @@ describe("readWaiting", () => {
   beforeEach(() => window.localStorage.clear());
   afterEach(() => window.history.replaceState(null, "", "/r/"));
   it("keeps the Done link's report, and a later report of none clears that site", () => {
-    window.history.replaceState(null, "", "/r/#ttf=tok&" + encodeWaiting("bonus-decade", { "/sauna": 2 }));
-    expect(readWaiting(window)).toEqual({ "bonus-decade": { "/sauna": 2 } });
-    window.history.replaceState(null, "", "/r/#ttf=tok&" + encodeWaiting("gl", { "/x": 1 }));
-    expect(readWaiting(window)).toEqual({ "bonus-decade": { "/sauna": 2 }, gl: { "/x": 1 } });
+    const [a, b, c] = ids(3);
+    window.history.replaceState(null, "", "/r/#ttf=tok&" + encodeWaiting("bonus-decade", { "/sauna": [a, b] }));
+    expect(readWaiting(window)).toEqual({ "bonus-decade": { "/sauna": [a, b] } });
+    window.history.replaceState(null, "", "/r/#ttf=tok&" + encodeWaiting("gl", { "/x": [c] }));
+    expect(readWaiting(window)).toEqual({ "bonus-decade": { "/sauna": [a, b] }, gl: { "/x": [c] } });
     window.history.replaceState(null, "", "/r/#ttf=tok");
-    expect(readWaiting(window)).toEqual({ "bonus-decade": { "/sauna": 2 }, gl: { "/x": 1 } }); // kept between visits
-    window.history.replaceState(null, "", "/r/#ttf=tok&" + encodeWaiting("bonus-decade", { "/sauna": 0 }));
-    expect(readWaiting(window)).toEqual({ gl: { "/x": 1 } });
-    expect(JSON.parse(window.localStorage.getItem(WAITING_KEY)!)).toEqual({ gl: { "/x": 1 } });
+    expect(readWaiting(window)).toEqual({ "bonus-decade": { "/sauna": [a, b] }, gl: { "/x": [c] } }); // kept between visits
+    window.history.replaceState(null, "", "/r/#ttf=tok&" + encodeWaiting("bonus-decade", { "/sauna": [] }));
+    expect(readWaiting(window)).toEqual({ gl: { "/x": [c] } });
+    expect(JSON.parse(window.localStorage.getItem(WAITING_KEY)!)).toEqual({ gl: { "/x": [c] } });
+  });
+  it("drops stored bare counts (from before ids): they can never be checked off", () => {
+    const [a] = ids(1);
+    window.localStorage.setItem(WAITING_KEY, JSON.stringify({ s: { "/old": 1, "/new": [a] }, t: { "/old": 2 } }));
+    window.history.replaceState(null, "", "/r/#ttf=tok");
+    expect(readWaiting(window)).toEqual({ s: { "/new": [a] } });
   });
   it("ignores junk in storage", () => {
     window.localStorage.setItem(WAITING_KEY, "not json");
@@ -273,12 +283,49 @@ describe("mountReviewer", () => {
     btn!.click();
     await vi.waitFor(() => expect(document.body.textContent).toContain("Nothing to review yet."));
   });
-  it("shows the Done link's waiting count, then drops it from the address but keeps the token", async () => {
-    window.history.replaceState(null, "", "/r/#ttf=tok&" + encodeWaiting("bonus-decade", { "/sauna": 2 }));
-    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ name: "Ben", assignments: [assignment()] }))));
+  /** /api/me answers with one Sauna page; the page's comment list holds `onServer` client ids. */
+  const service = (onServer: string[], list: "ok" | "down" = "ok") =>
+    vi.fn(async (url: string) => {
+      if (url.startsWith("/api/me/pages/comments")) {
+        if (list === "down") throw new TypeError("offline");
+        expect(url).toBe("/api/me/pages/comments?site=bonus-decade&path=%2Fsauna");
+        return new Response(JSON.stringify({ comments: onServer.map((client_id) => ({ client_id })) }));
+      }
+      return new Response(JSON.stringify({ name: "Ben", assignments: [assignment({}, { total: onServer.length })] }));
+    });
+  it("shows the Done link's waiting comments, then drops them from the address but keeps the token", async () => {
+    window.history.replaceState(null, "", "/r/#ttf=tok&" + encodeWaiting("bonus-decade", { "/sauna": ids(2) }));
+    vi.stubGlobal("fetch", service([]));
     await mountReviewer(window);
     expect(document.body.textContent).toContain("2 comments waiting to send");
     expect(window.location.hash).toBe("#ttf=tok");
+  });
+  it("a waiting comment that has since reached the service stops showing as waiting", async () => {
+    const [sent, unsent] = ids(2);
+    window.localStorage.setItem(WAITING_KEY, JSON.stringify({ "bonus-decade": { "/sauna": [sent, unsent] } }));
+    window.history.replaceState(null, "", "/r/#ttf=tok");
+    vi.stubGlobal("fetch", service([sent]));
+    await mountReviewer(window);
+    await vi.waitFor(() => expect(document.body.textContent).toContain("1 comment waiting to send"));
+    expect(JSON.parse(window.localStorage.getItem(WAITING_KEY)!)).toEqual({ "bonus-decade": { "/sauna": [unsent] } });
+  });
+  it("once every waiting comment has arrived, the line and the row note go", async () => {
+    const [sent] = ids(1);
+    window.localStorage.setItem(WAITING_KEY, JSON.stringify({ "bonus-decade": { "/sauna": [sent] } }));
+    window.history.replaceState(null, "", "/r/#ttf=tok");
+    vi.stubGlobal("fetch", service([sent]));
+    await mountReviewer(window);
+    await vi.waitFor(() => expect(document.body.textContent).not.toContain("waiting to send"));
+    expect(document.body.textContent).toContain("1 comment");
+    expect(JSON.parse(window.localStorage.getItem(WAITING_KEY)!)).toEqual({});
+  });
+  it("if the comment list can't be fetched, the waiting count stays as it was", async () => {
+    window.localStorage.setItem(WAITING_KEY, JSON.stringify({ "bonus-decade": { "/sauna": ids(1) } }));
+    window.history.replaceState(null, "", "/r/#ttf=tok");
+    vi.stubGlobal("fetch", service([], "down"));
+    await mountReviewer(window);
+    await new Promise((r) => setTimeout(r, 0));
+    expect(document.body.textContent).toContain("1 comment waiting to send");
   });
   it("restores the hash from storage so the address bar keeps a working link", async () => {
     window.localStorage.setItem("ttf:dash-token", "kept");

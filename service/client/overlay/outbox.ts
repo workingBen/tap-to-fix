@@ -248,10 +248,10 @@ export class Outbox {
     };
   }
 
-  /** Unsent counts per page path, for the dashboard hand-off. */
-  waitingByPath(): Record<string, number> {
-    const out: Record<string, number> = {};
-    for (const q of this.items) out[q.path] = (out[q.path] ?? 0) + 1;
+  /** Unsent comments' client ids per page path, for the dashboard hand-off. */
+  waitingByPath(): Record<string, string[]> {
+    const out: Record<string, string[]> = {};
+    for (const q of this.items) (out[q.path] ??= []).push(q.client_id);
     return out;
   }
 

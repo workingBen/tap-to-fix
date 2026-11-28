@@ -245,7 +245,7 @@ describe("Outbox", () => {
     const h = harness([], store);
     await h.box.load();
     expect(h.box.view().waiting.map((q) => q.client_id)).toEqual([mine.client_id, otherPath.client_id]);
-    expect(h.box.waitingByPath()).toEqual({ "/index.html": 1, "/other.html": 1 });
+    expect(h.box.waitingByPath()).toEqual({ "/index.html": [mine.client_id], "/other.html": [otherPath.client_id] });
     await h.box.reconcile(new Set([mine.client_id]));
     expect(h.box.view().waiting.map((q) => q.client_id)).toEqual([otherPath.client_id]);
     expect((await store.queued()).map((q) => q.client_id)).not.toContain(mine.client_id);
