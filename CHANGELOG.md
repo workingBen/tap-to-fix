@@ -8,6 +8,14 @@ All notable changes to tap-to-fix are listed here. The format follows
 
 ### Added
 
+- The reviewer list (`/r/`) is redesigned. Pages sit under **New**, **Updated since you looked** and **Looked at**
+  (colored headings), with a closed **Finished** list at the bottom. Rows are about 72 px. Four state icons, told apart
+  by shape as well as color: no comments yet, comments waiting, some settled, all done. A **⋯** on each row opens
+  **Review complete** and **Open the page**; finished rows have **Re-review**. A **Since you last looked** notice lists
+  each page with comments fixed since the last **Got it**, and how many.
+- `POST` / `DELETE /api/me/assignments/:id/finished`, `POST /api/me/acknowledge` (`{ through }`), and in `GET /api/me`
+  each page's `finished` / `finished_at` plus `fixed: { through, pages: [{ id, title, fixed, finished }] }`. Migrations
+  `0004_assignment_finished_at.sql` and `0005_reviewer_acknowledged_at.sql` add the columns.
 - A project site at https://workingben.github.io/tap-to-fix/ (served from `docs/`) and a README that
   opens with a banner, badges and the three steps as real screenshots.
 - Reviewer links show a picture card when texted or pasted (iMessage, Slack): "Tap to Fix · Your pages to review".

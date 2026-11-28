@@ -1,6 +1,17 @@
 // @vitest-environment happy-dom
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
-import { chipFor, countLine, mountReviewer, readWaiting, renderReviewer, WAITING_KEY, type MeAssignment } from "../../client/dash/reviewer";
+import {
+  countLine,
+  mountReviewer,
+  noticeHtml,
+  readWaiting,
+  renderReviewer,
+  sectionFor,
+  stateFor,
+  stateIcon,
+  WAITING_KEY,
+  type MeAssignment,
+} from "../../client/dash/reviewer";
 import { encodeWaiting } from "../../client/handoff";
 
 function assignment(over: Partial<MeAssignment> = {}, counts: Partial<MeAssignment["counts"]> = {}): MeAssignment {
@@ -19,20 +30,41 @@ function assignment(over: Partial<MeAssignment> = {}, counts: Partial<MeAssignme
   };
 }
 
-describe("chipFor", () => {
-  it("updated beats new", () => {
-    expect(chipFor(assignment({ is_updated: true, is_new: true }))).toBe("Updated since you looked");
+describe("sectionFor", () => {
+  it("new when never opened, even if something changed", () => {
+    expect(sectionFor(assignment({ is_new: true, is_updated: true }))).toBe("new");
   });
-  it("new when never opened", () => {
-    expect(chipFor(assignment({ is_new: true }))).toBe("New");
+  it("updated when opened and changed since", () => {
+    expect(sectionFor(assignment({ is_updated: true }))).toBe("updated");
   });
-  it("new beats all done", () => {
-    expect(chipFor(assignment({ is_new: true }, { total: 2, settled: 2 }))).toBe("New");
+  it("looked at otherwise, all done or not", () => {
+    expect(sectionFor(assignment())).toBe("seen");
+    expect(sectionFor(assignment({}, { total: 2, settled: 2 }))).toBe("seen");
   });
-  it("all done only when there are comments and all are settled", () => {
-    expect(chipFor(assignment({}, { total: 2, settled: 2 }))).toBe("All done");
-    expect(chipFor(assignment({}, { total: 0, settled: 0 }))).toBeNull();
-    expect(chipFor(assignment({}, { total: 3, settled: 2, open: 1 }))).toBeNull();
+  it("finished wins over everything, so a finished page never comes back to the top", () => {
+    expect(sectionFor(assignment({ finished: true, is_new: true, is_updated: true }))).toBe("finished");
+  });
+});
+
+describe("stateFor and stateIcon", () => {
+  it("four states", () => {
+    expect(stateFor(assignment())).toBe("none");
+    expect(stateFor(assignment({}, { total: 3, open: 3 }))).toBe("waiting");
+    expect(stateFor(assignment({}, { total: 4, settled: 2, open: 2 }))).toBe("some");
+    expect(stateFor(assignment({}, { total: 2, settled: 2 }))).toBe("done");
+  });
+  it("differ by shape: outline bubble, filled amber bubble, pie, check disc", () => {
+    const none = stateIcon("none");
+    expect(none).toContain('fill="none"');
+    expect(none).toContain('stroke="var(--mut)"');
+    expect(stateIcon("waiting")).toContain('fill="var(--warn)"');
+    const some = stateIcon("some", 0.5);
+    expect(some).toContain("<circle");
+    expect(some).toMatch(/<path d="M11 11L11 0A11 11/);
+    const done = stateIcon("done");
+    expect(done).toContain('fill="var(--acc)"');
+    expect(done).toContain('stroke="#fff"');
+    for (const svg of [none, some, done]) expect(svg).toContain('aria-hidden="true"');
   });
 });
 
@@ -64,39 +96,93 @@ describe("renderReviewer", () => {
     expect(html).not.toContain("<script>");
     expect(html).toContain("&lt;script&gt;");
   });
-  it("shows site, path and count line", () => {
-    const html = renderReviewer({ name: "Alexis", assignments: [assignment({}, { total: 3, in_progress: 1, settled: 2 })] });
-    const text = new DOMParser().parseFromString(html, "text/html").body.textContent;
-    expect(text).toContain("Bonus Decade · /sauna");
-    expect(text).toContain("3 comments · 1 being fixed · 2 settled");
-  });
-  it("groups under site headings only when there is more than one site", () => {
-    const one = renderReviewer({ name: "Alexis", assignments: [assignment(), assignment({ id: "a2", path: "/cold" })] });
-    expect(one).not.toContain("data-site-heading");
+  it("shows the path and count line, and the site name only with two or more sites", () => {
+    const one = renderReviewer({ name: "Alexis", assignments: [assignment({}, { total: 3, in_progress: 1, settled: 2 })] });
+    const doc = new DOMParser().parseFromString(one, "text/html");
+    expect(doc.querySelector(".counts")?.textContent).toBe("3 comments · 1 being fixed · 2 settled");
+    expect(doc.querySelector(".where")?.textContent).toBe("· /sauna");
     const other = assignment({ id: "a3", site: { slug: "gl", name: "Greensprings", origin: "https://greensprings.life" } });
-    const two = renderReviewer({ name: "Alexis", assignments: [assignment(), other, assignment({ id: "a2" })] });
-    const doc = new DOMParser().parseFromString(two, "text/html");
-    const headings = [...doc.querySelectorAll("[data-site-heading]")].map((h) => h.textContent);
-    expect(headings).toEqual(["Bonus Decade", "Greensprings"]);
-    // Both Bonus Decade rows sit in the first group.
-    expect(doc.querySelectorAll("section")[0].querySelectorAll("a[data-assignment]").length).toBe(2);
-    // Under a heading the row shows only the path; with one site it shows "Site · /path".
-    const wheres = [...doc.querySelectorAll(".where")].map((w) => w.textContent);
-    expect(wheres).toEqual(["/sauna", "/sauna", "/sauna"]);
-    const single = new DOMParser().parseFromString(one, "text/html");
-    expect(single.querySelector(".where")?.textContent).toBe("Bonus Decade · /sauna");
+    const two = new DOMParser().parseFromString(renderReviewer({ name: "Alexis", assignments: [assignment(), other] }), "text/html");
+    expect([...two.querySelectorAll(".where")].map((w) => w.textContent)).toEqual(["· Bonus Decade · /sauna", "· Greensprings · /sauna"]);
+  });
+  it("sorts pages into New, Updated since you looked and Looked at, hiding empty sections", () => {
+    const html = renderReviewer({
+      name: "Alexis",
+      assignments: [
+        assignment({ id: "s1", title: "Seen" }),
+        assignment({ id: "n1", title: "Fresh", is_new: true }),
+        assignment({ id: "u1", title: "Changed", is_updated: true }),
+        assignment({ id: "s2", title: "Seen two" }, { total: 1, settled: 1 }),
+      ],
+    });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const secs = [...doc.querySelectorAll("section[data-section]")];
+    expect(secs.map((s) => s.querySelector("h2")?.textContent)).toEqual(["New 1", "Updated since you looked 1", "Looked at 2"]);
+    expect(secs.map((s) => [...s.querySelectorAll("a[data-assignment] .title")].map((t) => t.textContent))).toEqual([
+      ["Fresh"],
+      ["Changed"],
+      ["Seen", "Seen two"],
+    ]);
+    // Only the all-done row has the badge; New and Updated are said by the headings.
+    expect([...doc.querySelectorAll(".bdg")].map((b) => b.closest("a")?.getAttribute("data-assignment"))).toEqual(["s2"]);
+    expect(doc.querySelector("details[data-section=finished]")).toBeNull();
+    const none = renderReviewer({ name: "Alexis", assignments: [assignment()] });
+    expect(none).not.toContain('data-section="new"');
+    expect(none).not.toContain('data-section="updated"');
+  });
+  it("each row has a 44 px ⋯ actions button; finished rows sit in a closed Finished list with Re-review", () => {
+    const html = renderReviewer({
+      name: "Alexis",
+      assignments: [assignment({ id: "a1" }), assignment({ id: "f1", title: "Done page", finished: true }, { total: 2, settled: 2 })],
+    });
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    expect(doc.querySelector('[data-actions="a1"]')?.getAttribute("aria-label")).toBe("Actions for Sauna guide");
+    const fin = doc.querySelector("details[data-section=finished]")!;
+    expect(fin.hasAttribute("open")).toBe(false);
+    expect(fin.querySelector("summary")?.textContent).toBe("Finished 1");
+    expect(fin.querySelector('[data-rereview="f1"]')?.textContent).toBe("Re-review");
+    expect(fin.querySelector("[data-actions]")).toBeNull();
+    expect(fin.querySelector(".bdg")).toBeNull();
+    expect(renderReviewer({ name: "A", assignments: [assignment({ finished: true })] }, {}, { finishedOpen: true })).toContain(
+      'data-section="finished" open',
+    );
+  });
+  it("says so when every page is finished", () => {
+    const html = renderReviewer({ name: "Alexis", assignments: [assignment({ finished: true })] });
+    expect(html).toContain("Every page is finished.");
   });
   it("empty state", () => {
     const html = renderReviewer({ name: "Alexis", assignments: [] });
     expect(html).toContain("Nothing to review yet. Ben will add pages here.");
   });
-  it("chip styles: soft for updated and new, plain for all done", () => {
+});
+
+describe("Since you last looked notice", () => {
+  const pages = [
+    assignment({ id: "a1", title: "Virtual EMF Assessment", url: "https://x.test/emf#ttf=t" }),
+    assignment({ id: "a2", title: "Home page", finished: true }),
+  ];
+  it("one line per page with how many were fixed, Finished pages tagged, and Got it", () => {
     const html = renderReviewer({
-      name: "Alexis",
-      assignments: [assignment({ is_new: true }), assignment({ id: "a2" }, { total: 1, settled: 1 })],
+      name: "Ben",
+      assignments: pages,
+      fixed: { through: "2026-01-01T00:00:00.000Z", pages: [{ id: "a1", title: "x", fixed: 2, finished: false }, { id: "a2", title: "y", fixed: 1, finished: true }] },
     });
-    expect(html).toMatch(/class="chip soft"[^>]*>New/);
-    expect(html).toMatch(/class="chip plain"[^>]*>[\s\S]*All done/);
+    const doc = new DOMParser().parseFromString(html, "text/html");
+    const nt = doc.querySelector("[data-notice]")!;
+    expect(nt.querySelector("h2")?.textContent).toBe("Since you last looked");
+    expect(nt.querySelector("button[data-ack]")?.textContent).toBe("Got it");
+    const lines = [...nt.querySelectorAll("a.li")];
+    expect(lines.map((l) => l.textContent)).toEqual(["Virtual EMF Assessment2 fixed", "Home pageFinished1 fixed"]);
+    expect(lines[0].getAttribute("href")).toBe("https://x.test/emf#ttf=t");
+    expect(lines[0].getAttribute("data-open")).toBe("a1");
+    // The finished page stays in Finished; the notice only names it.
+    expect(doc.querySelector("details[data-section=finished] a[data-assignment=a2]")).toBeTruthy();
+  });
+  it("nothing fixed, or an unknown page: no notice", () => {
+    expect(noticeHtml([], pages)).toBe("");
+    expect(noticeHtml([{ id: "gone", title: "Gone", fixed: 3, finished: false }], pages)).toBe("");
+    expect(renderReviewer({ name: "Ben", assignments: pages })).not.toContain("data-notice");
   });
 });
 
@@ -200,5 +286,110 @@ describe("mountReviewer", () => {
     vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ name: "Alexis", assignments: [] }))));
     await mountReviewer(window);
     expect(window.location.hash).toBe("#ttf=kept");
+  });
+});
+
+describe("mountReviewer actions", () => {
+  type Call = { url: string; method: string; body: string | null };
+  let calls: Call[];
+  const me = (over: object = {}) => ({
+    name: "Ben",
+    assignments: [
+      assignment({ id: "a1", title: "Virtual EMF Assessment" }, { total: 2, settled: 2 }),
+      assignment({ id: "f1", title: "Home page", finished: true }),
+    ],
+    fixed: { through: "2026-01-02T00:00:00.000Z", pages: [{ id: "a1", title: "Virtual EMF Assessment", fixed: 2, finished: false }] },
+    ...over,
+  });
+  const serve = (data: object, fail: RegExp | null = null) =>
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (url: string, init: RequestInit = {}) => {
+        calls.push({ url, method: init.method ?? "GET", body: typeof init.body === "string" ? init.body : null });
+        if (fail && fail.test(url)) return new Response("{}", { status: 500 });
+        if (url === "/api/me") return new Response(JSON.stringify(data));
+        return new Response(null, { status: 204 });
+      }),
+    );
+  const q = <T extends Element = HTMLElement>(sel: string) => document.querySelector<T>(sel);
+
+  beforeEach(() => {
+    calls = [];
+    window.localStorage.clear();
+    document.body.innerHTML = '<div id="app"></div>';
+    window.history.replaceState(null, "", "/r/#ttf=tok");
+  });
+  afterEach(() => {
+    vi.unstubAllGlobals();
+    window.history.replaceState(null, "", "/r/");
+  });
+
+  it("⋯ opens the sheet; Cancel and Escape close it and focus goes back to ⋯", async () => {
+    serve(me());
+    await mountReviewer(window);
+    const dots = q('[data-actions="a1"]')!;
+    dots.click();
+    expect(q(".sheet")?.getAttribute("role")).toBe("dialog");
+    expect(q(".sheet .sht")?.textContent).toBe("Virtual EMF Assessment");
+    expect([...document.querySelectorAll(".sheet .sbtn")].map((b) => b.textContent)).toEqual(["Review complete", "Open the page", "Cancel"]);
+    expect(document.activeElement).toBe(q(".sheet [data-finish]"));
+    q<HTMLButtonElement>(".sheet .sbtn.plain")!.click();
+    expect(q(".sheet")).toBeNull();
+    expect(document.activeElement).toBe(q('[data-actions="a1"]'));
+    q('[data-actions="a1"]')!.click();
+    document.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+    expect(q(".sheet")).toBeNull();
+  });
+
+  it("Review complete saves and moves the page into Finished; the notice tags it", async () => {
+    serve(me());
+    await mountReviewer(window);
+    q('[data-actions="a1"]')!.click();
+    q(".sheet [data-finish]")!.click();
+    await vi.waitFor(() => expect(q(".sheet")).toBeNull());
+    expect(calls.at(-1)).toMatchObject({ url: "/api/me/assignments/a1/finished", method: "POST" });
+    expect(q("details[data-section=finished] summary")?.textContent).toBe("Finished 2");
+    expect(q("details[data-section=finished] a[data-assignment=a1]")).toBeTruthy();
+    expect(q("section[data-section]")).toBeNull();
+    expect(q("[data-notice] a.li")?.textContent).toContain("Finished");
+  });
+
+  it("a failed Review complete keeps the sheet open with a message", async () => {
+    serve(me(), /finished/);
+    await mountReviewer(window);
+    q('[data-actions="a1"]')!.click();
+    q(".sheet [data-finish]")!.click();
+    await vi.waitFor(() => expect(q<HTMLElement>("[data-sheet-error]")!.hidden).toBe(false));
+    expect(q("[data-sheet-error]")?.textContent).toContain("Couldn't save");
+    expect(q("section[data-section=seen] a[data-assignment=a1]")).toBeTruthy();
+  });
+
+  it("Re-review brings a finished page back, and keeps Finished open if it was", async () => {
+    serve(me({ assignments: [assignment({ id: "f1", title: "Home page", finished: true }), assignment({ id: "f2", finished: true })] }));
+    await mountReviewer(window);
+    const det = q<HTMLDetailsElement>("details[data-section=finished]")!;
+    det.open = true;
+    det.dispatchEvent(new Event("toggle"));
+    q('[data-rereview="f1"]')!.click();
+    await vi.waitFor(() => expect(q("section[data-section=seen] a[data-assignment=f1]")).toBeTruthy());
+    expect(calls.at(-1)).toMatchObject({ url: "/api/me/assignments/f1/finished", method: "DELETE" });
+    expect(q<HTMLDetailsElement>("details[data-section=finished]")!.open).toBe(true);
+  });
+
+  it("Got it hides the notice and sends back the time it was built from", async () => {
+    serve(me());
+    await mountReviewer(window);
+    expect(q("[data-notice]")).toBeTruthy();
+    q("[data-ack]")!.click();
+    expect(q("[data-notice]")).toBeNull();
+    await vi.waitFor(() => expect(calls.at(-1)?.url).toBe("/api/me/acknowledge"));
+    expect(calls.at(-1)).toMatchObject({ method: "POST", body: JSON.stringify({ through: "2026-01-02T00:00:00.000Z" }) });
+  });
+
+  it("a notice line marks the page opened, like its row", async () => {
+    serve(me());
+    await mountReviewer(window);
+    q("[data-notice] a.li")!.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true, button: 0 }));
+    await vi.waitFor(() => expect(calls.at(-1)).toMatchObject({ url: "/api/me/assignments/a1/opened", method: "POST" }));
   });
 });
